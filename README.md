@@ -1,267 +1,117 @@
-# CUA Skill — Computer Use Agent with Skills
+# CUA-Skill Agent
 
-**CUA Skill** is a skill-based autonomous GUI agent framework for Windows desktop applications. Instead of generating every low-level action from scratch, CUA Skill retrieves and executes pre-recorded action sequences (skills) from an indexed library, enabling reliable and efficient task completion across 17+ Windows applications.
+面向 Windows 桌面环境的 AI 自动化操作 Agent（#25 实训项目）。用户用自然语言下达指令，系统自动操作桌面 GUI 完成任务。
 
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Supported Applications](#supported-applications)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Configuration](#configuration)
-- [Agent Modes](#agent-modes)
-  - [Replay Agent](#replay-agent)
-  - [RAG Agent](#rag-agent)
-- [User Task Generation](#user-task-generation)
-- [Evaluation (Windows Agent Arena)](#evaluation-windows-agent-arena)
-- [Project Structure](#project-structure)
-- [License](#license)
-
----
-
-## Overview
-
-CUA Skill provides two agent modes for automating desktop tasks:
-
-| Mode | Description |
-|------|-------------|
-| **Replay Agent** | Executes pre-defined task graphs step-by-step with vision-based grounding |
-| **RAG Agent** | Uses an LLM planner with Retrieval-Augmented Generation (RAG) to dynamically retrieve, select, and configure skills at runtime |
-
-The core insight is that many desktop tasks share common action patterns (e.g., opening apps, clicking menus, typing text). By indexing these patterns as reusable skills, the agent can accomplish complex tasks through composition rather than trial-and-error.
-
----
-
-## Architecture
+## 架构
 
 ```
-┌───────────────────────────────────────────────────────┐
-│                      CUA Skill Agent                  │
-├──────────────┬───────────────┬────────────────────────┤
-│   Planner    │   Retriever   │   Mixture Grounding    │
-│  (LLM-based) │  (BM25 +      │  (UI-TARS / UIA Tree)  │
-│              │   Semantic)   │                        │
-├──────────────┴───────────────┴────────────────────────┤
-│                    Action System                      │
-│  ┌────────────┐  ┌────────────────┐  ┌─────────────┐  │
-│  │ Base       │  │ Common         │  │ App-Specific│  │
-│  │ Actions    │  │ Actions        │  │ Skills      │  │
-│  └────────────┘  └────────────────┘  └─────────────┘  │
-├───────────────────────────────────────────────────────┤
-│                Desktop Environment                    │
-│          (Screenshots, A11y Tree, pyautogui)          │
-└───────────────────────────────────────────────────────┘
+用户自然语言指令
+        │
+        ▼
+┌──────────────────────────────┐
+│  skill_matcher.py  技能匹配器 │  ← 正则快路径 + 评分慢路径，零 Token
+├──────────────────────────────┤
+│  agent_rag.py  执行引擎      │  ← 按预定义模板逐步执行，UIA 定位坐标
+├──────────────────────────────┤
+│  mixture_grounding.py        │  ← Windows UIA（主）+ Ollama 视觉（兜底）
+└──────────────────────────────┘
+        │
+        ▼
+  desktop_env.step(gui_code)    → pyautogui / pywinauto 执行
 ```
 
-### Key Components
+## 环境要求
 
-- **Planner** — LLM-driven (GPT or Qwen) component that generates search queries, selects the best action from retrieved candidates, configures action parameters, and maintains an action memory.
-- **Retriever** — Hybrid search engine combining BM25+ keyword ranking and semantic embeddings for skill retrieval from the indexed library.
-- **Mixture Grounding** — Refines click coordinates using vision grounding models (UI-TARS v1 endpoint) in a mixture-of-experts pattern.
-- **Action System** — 20+ base actions (click, type, scroll, hotkey, etc.) with a registry pattern, plus composable action graphs (DAGs) for multi-step skills.
-- **Desktop Environment** — Wraps `pyautogui` and `pywinauto` for screenshots, accessibility tree extraction, and action execution.
+- Windows 10/11
+- Python 3.10+
+- [Ollama](https://ollama.com/) 已安装并运行
+- 视觉模型：`ollama pull qwen2.5vl:7b`（约 4.5GB，需 8G+ VRAM）
 
----
-
-## Supported Applications
-
-| Application | Skill Module |
-|-------------|-------------|
-| Windows Start / Search / Run | `common_action.py` |
-| Bing Search | `bing_search_action.py` |
-| Google Chrome | `chrome_actions.py` |
-| Microsoft Edge | `microsoft_edge_action.py` |
-| Microsoft Excel | `excel_action.py` |
-| Microsoft Word | `word_action.py` |
-| Microsoft PowerPoint | `powerpoint_action.py` |
-| Notepad | `notepad_action.py` |
-| Paint | `paint_action.py` |
-| Calculator | `calculator_action.py` |
-| Clock | `clock_action.py` |
-| File Explorer | `file_explorer_action.py` |
-| VLC Media Player | `vlc_action.py` |
-| VS Code | `vs_code_action.py` |
-| Amazon | `amazon_action.py` |
-| YouTube | `youtube_action.py` |
-| Windows Settings | `windows_settings_action.py` |
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- **Python 3.10+**
-- **Windows OS** (agent interacts with the Windows desktop)
-- Azure OpenAI access (for LLM planner and grounding models)
-- (Optional) Local Qwen model for offline planner
-
-### Installation
-
-1. Clone the repository:
-   ```bash
-   git clone <repo-url>
-   cd cua_skill
-   ```
-
-2. Install dependencies:
-   ```bash
-   pip install -r agent/requirements.txt
-   ```
-
-3. For Windows Agent Arena evaluation, install additional dependencies:
-   ```bash
-   pip install -r agent/requirements_waa.txt
-   ```
-
-### Configuration
-
-1. Create a `.env` file in the `agent/` directory:
-   ```
-   UITARS_V1_BEARER_KEY="your_uitars_key"
-   AZURE_AD_TOKEN=""
-   ```
-
-2. Configure the agent via JSON config files:
-   - **`agent/config.json`** — Replay agent settings (environment, grounding, logging)
-   - **`agent/config_rag.json`** — RAG agent settings (planner model, retrieval parameters, RAG index paths)
-
-Key configuration options:
-
-| Setting | File | Description |
-|---------|------|-------------|
-| `mixture_grounding.expertises` | `config.json` | Vision grounding model endpoints and weights |
-| `planner.model_class` | `config_rag.json` | LLM planner backend: `"gpt"` or `"qwen"` |
-| `rag.semantic_weight` | `config_rag.json` | Blending weight for hybrid search (default: 0.7) |
-| `max_steps` | Both | Maximum actions per task (default: 50) |
-| `max_wall_time` | Both | Timeout in seconds (default: 300) |
-
----
-
-## Agent Modes
-
-### Replay Agent
-
-The **Replay Agent** (`CUAKnowledgeGraphAgent`) executes pre-defined task graphs:
-
-1. Loads a task definition (JSON) as a directed graph of actions
-2. Pops steps one-by-one in topological order
-3. For each step, applies mixture grounding to refine coordinates
-4. Executes the action via the desktop environment
-
-```python
-from agent import CUAKnowledgeGraphAgent
-
-agent = CUAKnowledgeGraphAgent(config="agent/config.json")
-agent.proceed(instruction="Open Notepad and type Hello", example=task_json)
-```
-
-### RAG Agent
-
-The **RAG Agent** (`CUARAGAgent`) dynamically plans and executes tasks:
-
-1. **Feasibility check** — LLM evaluates if the task is achievable from the current screen
-2. **Loop** until completion or timeout:
-   - Capture screenshot observation
-   - **Generate search queries** from task description + action history + screenshot
-   - **Retrieve skills** via hybrid BM25 + semantic search over the indexed skill library
-   - **Select** the best action from retrieved candidates (with base action fallbacks)
-   - **Configure** action parameters using the LLM + current screenshot
-   - **Ground** coordinates via the mixture grounding model (UI-TARS)
-   - **Execute** the action
-   - **Update memory** — LLM summarizes the outcome for future context
-
-```python
-from agent import CUARAGAgent
-
-agent = CUARAGAgent(config="agent/config_rag.json")
-agent.proceed(instruction="Search for 'weather today' on Bing")
-```
-
----
-
-## User Task Generation
-
-The `user_task_generation/` module provides a pipeline for synthesizing diverse user tasks from **primitive operations** and **compositions**:
-
-1. **Define primitive operations** per application (e.g., `BingSearchLaunch`, `InsertImage`) with argument generators
-2. **Create compositions** combining primitives into multi-step user tasks
-3. **Generate** tasks with automatic argument filling, instruction drop-off for diversity, and LLM-based rephrasing
+## 快速开始
 
 ```bash
-python user_task_generation/user_task_generator.py \
-  --primitive-operation ./asset/primitive_operation/bingsearch_primitive_operation.json \
-  --composition ./asset/primitive_operation_composition/bingsearch_primitive_operation_composition.json \
-  --app-name bingsearch \
-  --out-dir ./asset/user_task \
-  --num-tasks 10000
+# 安装依赖
+cd cua_skill
+pip install -r agent/requirements.txt
+pip install flask
+
+# 确保 Ollama 在运行
+ollama serve
+
+# CLI 方式执行
+python run.py "Open Notepad"
+python run.py -c agent/config_ollama.json "打开计算器"
+
+# 直接模式（绕过 AI，更快）
+python run_direct.py "Open Word"
+
+# Web 控制台（推荐）
+python web/app.py
+# 浏览器打开 http://localhost:5000
+
+# 技能匹配测试
+python test_match.py
 ```
 
-See [user_task_generation/README.md](user_task_generation/README.md) for full documentation.
+## 项目结构
 
----
+| 路径 | 说明 |
+|------|------|
+| `agent/skill_matcher.py` | **新增**。指令→技能匹配器，正则 + 关键词评分 |
+| `agent/agent_rag.py` | **重写**。执行引擎，匹配技能后按固定模板执行 |
+| `agent/mixture_grounding.py` | **修改**。UIA 坐标定位 + Ollama 视觉兜底 |
+| `agent/config_ollama.json` | **新增**。Ollama 本地模型专用配置 |
+| `agent/action/` | 预置 252 个组合动作（Notepad/Word/Excel/Chrome 等） |
+| `web/app.py` | **新增**。Flask Web 控制台后端 |
+| `web/templates/index.html` | **新增**。Web 控制台前端页面 |
+| `run.py` | **新增**。CLI 主入口 |
+| `run_direct.py` | **新增**。绕过 AI 直接执行 |
+| `test_match.py` | **新增**。技能匹配器单元测试（29 用例） |
+| `test_quick.py` | **新增**。组件诊断测试（Ollama / pyautogui / Planner） |
+| `change.md` | **新增**。完整改动记录 |
+| `detail.md` | **新增**。项目流程文档 |
 
-## Evaluation (Windows Agent Arena)
+## 支持的指令类型
 
-CUA Skill can be evaluated in the [Windows Agent Arena](https://github.com/microsoft/WindowsAgentArena) environment:
+| 指令类型 | 示例 |
+|---------|------|
+| 打开应用 | `open Word`, `打开记事本`, `帮我打开excel` |
+| 关闭应用 | `close notepad`, `关闭记事本` |
+| 输入文字 | `type hello in notepad`, `输入test in word` |
+| 保存文件 | `save file in notepad`, `save as doc in word` |
+| 缩放 | `zoom in notepad`, `zoom out chrome` |
+| 搜索 | `search python in chrome` |
+| 查找替换 | `find hello and replace with world in notepad` |
+| 复制 | `copy item in file explorer` |
 
-1. Set up the Windows Agent Arena Docker image (see [evaluation/WindowsAgentArena/README.md](evaluation/WindowsAgentArena/README.md))
-2. Place test JSON files in `evaluation/WindowsAgentArena/test_jsons/`
-3. Run evaluation:
-   ```bash
-   cd evaluation/WindowsAgentArena
-   sudo bash ./run_cua_rag.sh <test_json_filename> [options]
-   ```
+## 两种执行模式
 
-Available options:
-- `--use_gold_image` — Use the clean backup storage image
-- `--clean_mode` — Reset environment between test cases (recommended)
-- `--reset_image` — Regenerate storage from setup ISO
+| 模式 | 命令 | 说明 |
+|------|------|------|
+| Agent 模式 | `python run.py "open word"` | 技能匹配 → 模板执行 → UIA 定位 |
+| 直接模式 | `python run_direct.py "open word"` | Win + 输入 + Enter，绕过所有 AI |
 
----
+## 性能
 
-## Project Structure
+| 环节 | 方式 | 耗时 |
+|------|------|------|
+| 指令→技能匹配 | 正则 + 关键词 | < 0.001s |
+| 技能步骤执行 | 预定义固定模板 | 取决于操作数量 |
+| 点击坐标定位 | Windows UIA API | < 0.01s |
+| LLM 视觉定位 | Ollama（仅兜底） | ~10s |
 
-```
-cua_skill/
-├── agent/                        # Core agent framework
-│   ├── agent.py                  # Replay agent (CUAKnowledgeGraphAgent)
-│   ├── agent_rag.py              # RAG agent (CUARAGAgent)
-│   ├── agent_waa.py              # WAA adapter for replay agent
-│   ├── agent_rag_waa.py          # WAA adapter for RAG agent
-│   ├── planner.py                # LLM-based planning (query gen, action selection, config)
-│   ├── retrieval.py              # Hybrid BM25 + semantic retrieval engine
-│   ├── mixture_grounding.py      # Vision-based coordinate grounding (UI-TARS)
-│   ├── llms.py                   # LLM clients (Azure OpenAI GPT, local Qwen)
-│   ├── desktop_env.py            # Desktop environment wrapper
-│   ├── replay_task.py            # Task graph parser and executor
-│   ├── config.json               # Replay agent configuration
-│   ├── config_rag.json           # RAG agent configuration
-│   ├── action/                   # Action system
-│   │   ├── base_action.py        # Base actions with registry pattern
-│   │   ├── compose_action.py     # Composable action DAGs
-│   │   ├── <app>_action.py       # Application-specific skill modules
-│   │   └── argument.py           # Action argument definitions
-│   └── utils/                    # Utilities (logging, UIA, config, etc.)
-├── user_task_generation/         # Task synthesis pipeline
-│   ├── user_task_generator.py    # Main generator script
-│   ├── argument_value_generator/ # Realistic argument value generators
-│   └── README.md                 # Task generation documentation
-├── evaluation/                   # Evaluation tooling
-│   └── WindowsAgentArena/        # WAA integration and analysis notebooks
-├── docs/                         # Project documentation website
-├── LICENSE                       # MIT License
-└── README.md                     # This file
-```
+## 项目状态
 
----
+- ✅ 技能匹配器（29/29 测试通过）
+- ✅ Agent 执行引擎（无 LLM 推理）
+- ✅ UIA 坐标定位（像素级）
+- ✅ Web 控制台
+- ✅ Ollama 本地模型适配
+- ✅ 直接执行模式
+- ⏳ 定时调度机制
+- ⏳ 自定义 Skill 封装
+- ⏳ WindowsAgentArena 基准评估
 
-## License
+## 框架来源
 
-This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for details.
-
-Copyright (c) 2026 Microsoft Corporation.
+基于 [microsoft/cua_skill](https://github.com/microsoft/cua_skill) 框架修改，MIT License。
