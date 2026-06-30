@@ -2,7 +2,8 @@ from io import BytesIO
 import os
 import base64
 import sys
-import logging  # Add this import
+import logging
+import re
 
 # Suppress debug logs from OpenAI and HTTP libraries
 logging.getLogger("openai").setLevel(logging.WARNING)
@@ -12,7 +13,6 @@ logging.getLogger("azure").setLevel(logging.WARNING)
 from pathlib import Path
 
 from .utils import Misc, SessionLogger, LogMessage, Status
-from .retrieval import ActionRetriever
 
 from .action.base_action import COMMON_EXECUTABLE_ACTIONS, _OP_REGISTRY
 from .llms import model_loader
@@ -357,29 +357,13 @@ class Planner:
         return prompt
     
     def get_initial_state_observation_prompt(self):
-        prompt = """You are a computer-use agent tasked with analyzing the initial screen state before starting task execution.
+        prompt = """You are a computer-use agent. Briefly describe what you see on the screen (1 sentence). Focus on UI elements relevant to the task.
 
         ## Main Task
         **Description:** {TASK_DESCRIPTION}
 
-        ## Current Screen
-        A total of 5 images are provided. The first image shows the full screen view, while the next four images are zoomed-in sections of the screen.
-
-        ## Instructions
-        Examine the current screen and provide insights on:
-
-        1. **Task-Relevant Elements:** Identify any UI elements, text, or visual indicators related to the main task. Focus on the text elements that may provide context or clues.
-        2. **Readiness Assessment:** Determine if the environment is properly set up to begin the task
-        - Are required applications open and accessible?
-        - Are there any blockers or unexpected conditions present?
-
-
         ## Output Format
-        Provide a concise summary (at most 2 sentences) describing:
-        - What you observe on the screen
-        - The current system readiness for the task,  
-        - If not ready, any immediate actions needed before proceeding with the main task
-        Return the summary directly without additional formatting.
+        One short sentence describing what is on the screen. Do NOT assess readiness or suggest waiting.
         """
         prompt = prompt.replace("{TASK_DESCRIPTION}", self.task)
         return prompt
@@ -487,6 +471,7 @@ class RAGPlanner(Planner):
         if "0percent" in self.config.rag.rel_action_sample_path:
             self.rag = None
         else:
+            from .retrieval import ActionRetriever
             self.rag = ActionRetriever(
             index_dir=self.project_path / self.config.rag.rel_index_dir,
             model_name=self.config.rag.model_name,
@@ -538,7 +523,7 @@ class RAGPlanner(Planner):
         return code
 
     def get_next_step_queries(self, screenshot):
-        max_retries = 3
+        max_retries = 1
         prompt = self.get_query_prompt()
         messages = self.llm.create_text_image_message(text=prompt, image=screenshot)
         for attempt in range(max_retries):
@@ -574,6 +559,23 @@ class RAGPlanner(Planner):
         return queries
 
 
+    def _extract_json(self, response):
+        """Extract JSON dict from LLM response, handling text before/after code fences."""
+        # Try to find ```json ... ``` or ``` ... ``` block
+        m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
+        if m:
+            json_str = m.group(1)
+        else:
+            # No code fence — try to find bare JSON object
+            m = re.search(r"\{.*?\}", response, re.DOTALL)
+            if m:
+                json_str = m.group(0)
+            else:
+                json_str = response
+        json_str = json_str.replace("true", "True").replace("false", "False")
+        json_str = json_str.replace("null", "None")
+        return eval(json_str.strip())
+
     def parse_action_config(self, response):
         self.logger.info(
             LogMessage(
@@ -581,17 +583,8 @@ class RAGPlanner(Planner):
                 message=f"llm_action_config_response={response}",
             )
         )
-        if response.startswith("```json"):
-            response = response[7:]
-        elif response.startswith("```"):
-            response = response[3:]
-        if response.endswith("```"):
-            response = response[:-3]
-
-        response = response.replace("true", "True").replace("false", "False")
-        response = response.strip()
-        out_dict = eval(response)
-        out_dict = {k: str(v) for k, v in out_dict.items()}
+        out_dict = self._extract_json(response)
+        out_dict = {k: str(v) if not isinstance(v, (list, tuple)) else v for k, v in out_dict.items()}
         self.logger.info(
             LogMessage(
                 type="RAGPlanner.parse_action_config",
@@ -607,16 +600,7 @@ class RAGPlanner(Planner):
                 message=f"llm_query_generation_response={response}",
             )
         )
-        if response.startswith("```json"):
-            response = response[7:]
-        elif response.startswith("```"):
-            response = response[3:]
-        if response.endswith("```"):
-            response = response[:-3]
-
-        response = response.replace("true", "True").replace("false", "False")
-        response = response.strip()
-        out_dict = eval(response)
+        out_dict = self._extract_json(response)
         query_list = list(out_dict.values())
         self.logger.info(
             LogMessage(
@@ -633,16 +617,7 @@ class RAGPlanner(Planner):
                 message=f"llm_action_selection_response={response}",
             )
         )
-        if response.startswith("```json"):
-            response = response[7:]
-        elif response.startswith("```"):
-            response = response[3:]
-        if response.endswith("```"):
-            response = response[:-3]
-
-        response = response.replace("true", "True").replace("false", "False")
-        response = response.strip()
-        out_dict = eval(response)
+        out_dict = self._extract_json(response)
         action_idx = int(out_dict["action_index"])
         if self.rag:
             action_cat_idx = int(out_dict["action_category_index"])
@@ -664,7 +639,7 @@ class RAGPlanner(Planner):
         else:
             prompt = self.get_action_selection_prompt(candidate_actions, query)
         messages = self.llm.create_text_image_message(text=prompt, image=screenshot)
-        max_retries = 3
+        max_retries = 1
         for attempt in range(max_retries):
             response = self.llm.get_completion([messages])
             try:
@@ -672,8 +647,12 @@ class RAGPlanner(Planner):
                     self.parse_action_selection(response)
                 )
                 if action_cat_idx:  # from Additional Base Actions
+                    if selected_idx < 0 or selected_idx >= len(self.base_action_ls):
+                        selected_idx = 0  # fallback to first action
                     action = self.base_action_ls[selected_idx]
                 else:
+                    if selected_idx < 0 or selected_idx >= len(candidate_actions):
+                        selected_idx = 0
                     action = candidate_actions[selected_idx]
 
                 return action, action_description, action_cat_idx
@@ -798,7 +777,7 @@ class RAGPlanner(Planner):
 
         prompt = self.get_action_config_prompt(uninit_action, step_description)
         messages = self.llm.create_text_image_message(text=prompt, image=screenshot)
-        max_retries = 3
+        max_retries = 1
         for attempt in range(max_retries):
             response = self.llm.get_completion([messages])
             action_config = self.parse_action_config(response)

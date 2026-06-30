@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CUA-Skill Web Console</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: #faf7f2;
+  color: #3d3929;
+  min-height: 100vh; display: flex; justify-content: center;
+}
+.container { max-width: 800px; width: 100%; padding: 32px 24px; }
+h1 { font-size: 24px; margin-bottom: 4px; color: #b8860b; letter-spacing: 2px; }
+.subtitle { font-size: 13px; color: #9b8e7a; margin-bottom: 24px; }
+
+.input-row { display: flex; gap: 10px; margin-bottom: 18px; }
+.input-row input {
+  flex: 1; padding: 12px 16px; font-size: 15px;
+  background: #fff; color: #3d3929;
+  border: 2px solid #e0d5c1; border-radius: 8px;
+  font-family: inherit; outline: none;
+  transition: border-color 0.2s;
+}
+.input-row input:focus { border-color: #d4a017; box-shadow: 0 0 0 3px rgba(212,160,23,0.1); }
+.input-row select {
+  padding: 12px 10px; font-size: 14px;
+  background: #fff; color: #3d3929;
+  border: 2px solid #e0d5c1; border-radius: 8px;
+  font-family: inherit; outline: none; cursor: pointer;
+}
+.input-row button {
+  padding: 12px 28px; font-size: 15px; font-weight: 600;
+  background: linear-gradient(135deg, #d4a017, #b8860b);
+  color: #fff; border: none;
+  border-radius: 8px; cursor: pointer; font-family: inherit;
+  white-space: nowrap; letter-spacing: 1px;
+  transition: transform 0.1s, box-shadow 0.2s;
+}
+.input-row button:hover { box-shadow: 0 2px 12px rgba(184,134,11,0.3); transform: translateY(-1px); }
+.input-row button:disabled {
+  background: #d5cfc0; color: #fff; cursor: not-allowed;
+  box-shadow: none; transform: none;
+}
+
+.status-bar {
+  font-size: 14px; color: #8b7e65; margin-bottom: 14px;
+  display: flex; align-items: center; gap: 10px;
+}
+.status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.status-dot.idle { background: #ccc5b5; }
+.status-dot.running { background: #d4a017; animation: pulse 1s infinite; }
+.status-dot.ok { background: #5b9a3f; }
+.status-dot.fail { background: #d94a3a; }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.log-box {
+  background: #fffefb; border: 2px solid #e0d5c1;
+  border-radius: 8px; padding: 14px; height: 360px;
+  overflow-y: auto; font-size: 13px; line-height: 1.7;
+  margin-bottom: 24px; font-family: "Consolas", "Microsoft YaHei", monospace;
+}
+.log-line { color: #7a7060; }
+.log-line.info { color: #3d3929; }
+.log-line.ok { color: #5b9a3f; font-weight: 500; }
+.log-line.err { color: #d94a3a; font-weight: 500; }
+.log-line.warn { color: #b8860b; }
+
+.section-title {
+  font-size: 12px; color: #b8860b; margin-bottom: 10px;
+  text-transform: uppercase; letter-spacing: 2px; font-weight: 600;
+}
+.history-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px; border-radius: 6px; font-size: 14px;
+  cursor: pointer; transition: background 0.15s;
+}
+.history-item:hover { background: #f5f0e5; }
+.history-item .time { color: #b0a590; font-size: 12px; margin-left: auto; }
+.history-item .mode-tag {
+  font-size: 11px; padding: 2px 8px; border-radius: 4px;
+  background: #f5f0e5; color: #8b7e65; border: 1px solid #e0d5c1;
+}
+
+.empty { color: #c5bcab; font-size: 14px; padding: 12px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>CUA-Skill Web Console</h1>
+  <p class="subtitle">AI 驱动的 Windows 桌面自动化控制台</p>
+
+  <div class="input-row">
+    <input id="taskInput" type="text"
+           placeholder="输入自然语言指令，例如：帮我打开 Word"
+           autofocus
+           onkeydown="if(event.key==='Enter')runTask()">
+    <select id="modeSelect">
+      <option value="agent">Agent 模式</option>
+      <option value="direct">直接模式</option>
+    </select>
+    <button id="runBtn" onclick="runTask()">▶ 执行</button>
+  </div>
+
+  <div class="status-bar">
+    <span id="statusDot" class="status-dot idle"></span>
+    <span id="statusText">就绪</span>
+  </div>
+
+  <div class="section-title">执行日志</div>
+  <div class="log-box" id="logBox">
+    <div class="empty">等待指令输入...</div>
+  </div>
+
+  <div class="section-title">历史记录</div>
+  <div id="historyList">
+    <div class="empty">暂无记录</div>
+  </div>
+</div>
+
+<script>
+let pollingTimer = null;
+let currentTaskId = null;
+
+function $(id) { return document.getElementById(id); }
+
+async function runTask() {
+  const input = $("taskInput");
+  const instruction = input.value.trim();
+  if (!instruction) return;
+
+  const mode = $("modeSelect").value;
+  const btn = $("runBtn");
+  btn.disabled = true;
+  btn.textContent = "执行中...";
+
+  setStatus("running", "正在执行: " + instruction);
+  $("logBox").innerHTML = "";
+
+  try {
+    const resp = await fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task: instruction, mode: mode }),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      addLogs(["[error] " + data.error], "err");
+      setStatus("idle", "错误");
+      resetBtn();
+      return;
+    }
+    currentTaskId = data.task_id;
+    pollStatus(currentTaskId);
+  } catch (e) {
+    addLogs(["[error] 请求失败: " + e.message], "err");
+    setStatus("idle", "连接失败");
+    resetBtn();
+  }
+}
+
+function pollStatus(taskId) {
+  clearInterval(pollingTimer);
+  let lastIndex = -1;
+
+  pollingTimer = setInterval(async () => {
+    try {
+      const resp = await fetch(`/api/status/${taskId}?index=${lastIndex}`);
+      const data = await resp.json();
+      if (!data.logs) return;
+
+      if (data.logs.length > 0) {
+        addLogs(data.logs, "info");
+        lastIndex = data.index;
+      }
+
+      if (data.status === "completed") {
+        addLogs(["✓ 任务完成"], "ok");
+        setStatus("ok", "执行完成");
+        finishTask(taskId, "ok");
+      } else if (data.status === "failed") {
+        addLogs(["✗ 任务失败"], "err");
+        setStatus("fail", "执行失败");
+        finishTask(taskId, "fail");
+      }
+    } catch (e) {
+      // polling error, ignore
+    }
+  }, 800);
+}
+
+function addLogs(lines, cls) {
+  const box = $("logBox");
+  for (const line of lines) {
+    const div = document.createElement("div");
+    div.className = "log-line " + (cls || "info");
+    div.textContent = line;
+    box.appendChild(div);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+function setStatus(state, text) {
+  $("statusText").textContent = text;
+  $("statusDot").className = "status-dot " + state;
+}
+
+function resetBtn() {
+  const btn = $("runBtn");
+  btn.disabled = false;
+  btn.textContent = "▶ 执行";
+}
+
+function finishTask(taskId, finalStatus) {
+  clearInterval(pollingTimer);
+  pollingTimer = null;
+  currentTaskId = null;
+  resetBtn();
+  refreshHistory();
+}
+
+async function showTaskLogs(taskId) {
+  clearInterval(pollingTimer);
+  pollingTimer = null;
+  currentTaskId = null;
+  resetBtn();
+
+  try {
+    const resp = await fetch("/api/logs/" + taskId);
+    const data = await resp.json();
+    $("logBox").innerHTML = "";
+    if (data.logs && data.logs.length > 0) {
+      addLogs(data.logs, "info");
+    }
+    setStatus(data.status === "completed" ? "ok" : "fail",
+              data.instruction + " (" + data.mode + ")");
+  } catch (e) {
+    // ignore
+  }
+}
+
+async function refreshHistory() {
+  try {
+    const resp = await fetch("/api/tasks");
+    const data = await resp.json();
+    const list = $("historyList");
+    if (data.length === 0) {
+      list.innerHTML = '<div class="empty">暂无记录</div>';
+      return;
+    }
+    list.innerHTML = data.map(t => {
+      const icon = t.status === "completed" ? "✓" : t.status === "failed" ? "✗" : "◎";
+      const cls = t.status === "completed" ? "ok" : t.status === "failed" ? "err" : "warn";
+      return `<div class="history-item" onclick="showTaskLogs('${t.task_id}')">
+        <span class="log-line ${cls}">${icon}</span>
+        <span>${escapeHtml(t.instruction)}</span>
+        <span class="mode-tag">${t.mode}</span>
+        <span class="time">${t.created_at}</span>
+      </div>`;
+    }).join("");
+  } catch (e) { /* ignore */ }
+}
+
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// Load history on page load
+refreshHistory();
+</script>
+</body>
+</html>

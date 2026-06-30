@@ -47,23 +47,23 @@ EXECUTABLE_ACTIONS = {
 }
 
 
-COMMON_EXECUTABLE_ACTIONS = {
-    "SingleClickAction",
-    "DoubleClickAction",
-    "RightClickAction",
-    "MoveAction",
-    "DragAction", 
-    "TripleClickAction",
-    "ScrollAction",
-    "TypeAction",
-    "PressKeyAction",
-    "HotKeyAction",
-    "CopyAction",
-    "PasteAction",
-    "SwitchWindowAction",
-    "WaitAction",
-    # "ScreenUnderstandingAction"
-}
+COMMON_EXECUTABLE_ACTIONS = [
+    "DoubleClickAction",       # 0 — best for opening desktop icons
+    "SingleClickAction",       # 1 — click buttons, menu items
+    "TypeAction",              # 2 — type text
+    "PressKeyAction",          # 3 — press a single key (Enter, Escape, etc.)
+    "HotKeyAction",            # 4 — key combo (Win+R, Alt+Tab, etc.)
+    "WaitAction",              # 5 — wait/pause
+    "SwitchWindowAction",      # 6 — switch between windows
+    "ScrollAction",            # 7 — scroll
+    "FinishAction",            # 8 — signal task complete
+    # "RightClickAction",      # removed — rarely needed, confuses LLM
+    # "MoveAction",
+    # "DragAction",
+    # "TripleClickAction",
+    # "CopyAction",
+    # "PasteAction",
+]
 
 
 class BaseAction(ABC):
@@ -186,6 +186,9 @@ class BaseAction(ABC):
 @register("SingleClickAction")
 class SingleClickAction(BaseAction):
     type: str = "click"
+    descriptions: List[str] = [
+        "Single left-click at a screen coordinate. Use this to select or activate UI elements like buttons, icons, and menu items."
+    ]
     coordinate: Argument = Argument(
         value=None,
         description="The (x, y) coordinate to click on the screen."
@@ -204,7 +207,7 @@ class SingleClickAction(BaseAction):
 
     def get_gui_code(self) -> str:
         x, y = self.coordinate.value if self.coordinate.value else (None, None)
-        btn = self.button.value
+        btn = self.button.value or "left"
         mods = self.process_listlike_str(self.modifiers.value)
         return (
             "import pyautogui\n"
@@ -220,9 +223,12 @@ class SingleClickAction(BaseAction):
     def call_grounding_model(
         self,
         grounding_expertise: None,
-        observation: Any):
+        observation: Any,
+        action_description: str = None):
+        if action_description is None:
+            action_description = self.thought
         refined_coordinate = grounding_expertise.predict(
-            action_description=self.thought,
+            action_description=action_description,
             observation=observation
         )
         self.coordinate.value = refined_coordinate
@@ -231,6 +237,9 @@ class SingleClickAction(BaseAction):
 @register("DoubleClickAction")
 class DoubleClickAction(BaseAction):
     type: str = "double_click"
+    descriptions: List[str] = [
+        "Double-click at a screen coordinate. Use this to open desktop icons, files, and folders. This is the standard way to launch applications from desktop shortcuts."
+    ]
     coordinate: Argument = Argument(
         value=None,
         description="The (x, y) coordinate to double-click on the screen."
@@ -258,9 +267,12 @@ class DoubleClickAction(BaseAction):
     def call_grounding_model(
         self,
         grounding_expertise: None,
-        observation: Any):
+        observation: Any,
+        action_description: str = None):
+        if action_description is None:
+            action_description = self.thought
         refined_coordinate = grounding_expertise.predict(
-            action_description=self.thought,
+            action_description=action_description,
             observation=observation
         )
         self.coordinate.value = refined_coordinate
@@ -295,9 +307,12 @@ class TripleClickAction(BaseAction):
     def call_grounding_model(
         self,
         grounding_expertise: None,
-        observation: Any):
+        observation: Any,
+        action_description: str = None):
+        if action_description is None:
+            action_description = self.thought
         refined_coordinate = grounding_expertise.predict(
-            action_description=self.thought,
+            action_description=action_description,
             observation=observation
         )
         self.coordinate.value = refined_coordinate
@@ -328,9 +343,12 @@ class RightClickAction(BaseAction):
     def call_grounding_model(
         self,
         grounding_expertise: None,
-        observation: Any):
+        observation: Any,
+        action_description: str = None):
+        if action_description is None:
+            action_description = self.thought
         refined_coordinate = grounding_expertise.predict(
-            action_description=self.thought,
+            action_description=action_description,
             observation=observation
         )
         self.coordinate.value = refined_coordinate
@@ -366,9 +384,12 @@ class MoveAction(BaseAction):
     def call_grounding_model(
         self,
         grounding_expertise: None,
-        observation: Any):
+        observation: Any,
+        action_description: str = None):
+        if action_description is None:
+            action_description = self.thought
         refined_coordinate = grounding_expertise.predict(
-            action_description=self.thought,
+            action_description=action_description,
             observation=observation
         )
         self.coordinate.value = refined_coordinate
@@ -698,6 +719,9 @@ class WaitAction(BaseAction):
 @register("FinishAction")
 class FinishAction(BaseAction):
     type: str = "finish"
+    descriptions: List[str] = [
+        "Signal that the task is complete and stop further actions."
+    ]
 
     def get_gui_code(self) -> str:
         return "# FINISH: no-op marker\n"

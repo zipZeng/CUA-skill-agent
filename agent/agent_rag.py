@@ -1,12 +1,16 @@
 import os
+import sys
 from typing import List, Dict
 from types import SimpleNamespace
 from .utils import Misc, SessionLogger, LogMessage, Status
-from .action import BaseAction
+from .action import BaseAction, BaseComposeAction
 import time
 from .mixture_grounding import MixtureGrounding
 import warnings
 from .planner import RAGPlanner
+from .skill_matcher import match_instruction
+import re
+import pyautogui
 
 warnings.filterwarnings("ignore")
 
@@ -34,6 +38,146 @@ class CUARAGAgent:
         )
         self.mixture_grounding.force_reset_logger(self.logger)
         self.planner.force_reset_logger(self.logger)
+
+    def _ground_click_action(self, action, step_description=""):
+        """Run UIA grounding for click-type actions. Uses the action's own
+        thought as grounding target — composed actions encode meaningful
+        descriptions (e.g. 'Click the Windows Start button')."""
+        if hasattr(action, "call_grounding_model"):
+            action_type = getattr(action, "type", "")
+            if action_type in ("click", "double_click", "right_click",
+                               "triple_click", "move_abs", "drag"):
+                observation = self.env.get_observation()
+                grounding_desc = step_description or getattr(action, "thought", "")
+                if hasattr(grounding_desc, "value"):
+                    grounding_desc = grounding_desc.value
+                action.call_grounding_model(
+                    grounding_expertise=self.mixture_grounding,
+                    observation=observation,
+                    action_description=str(grounding_desc),
+                )
+
+    def _execute_skill(self, skill_class, params: dict, cancel_event=None):
+        """Execute a composed action (skill) — no LLM. Each click step
+        gets UIA grounding for coordinates."""
+        attempt_start_time = time.time()
+        task_status = Status.IN_PROGRESS
+
+        try:
+            operation = skill_class(**{k: v for k, v in params.items()
+                                      if hasattr(skill_class, k)})
+        except Exception as e:
+            self.logger.info(LogMessage(
+                type="skill_instantiate_error",
+                message=f"Failed to instantiate {skill_class.__name__}: {e}",
+            ))
+            return Status.FAILURE
+
+        if hasattr(operation, "configure_from_env"):
+            operation.configure_from_env(env=self.env)
+
+        self.logger.info(LogMessage(
+            type="skill_start",
+            message=f"Executing skill: {skill_class.__name__} params={params}",
+        ))
+
+        step_count = 0
+        max_substeps = getattr(self.config, "max_steps", 30)
+        while True:
+            if self.termination(task_status, cancel_event, attempt_start_time):
+                return task_status
+            step_count += 1
+            if step_count > max_substeps:
+                return Status.TIMEOUT
+
+            action = operation.step(edge_name_pref="hotkey")
+            if action is None:
+                break
+
+            self._ground_click_action(action)
+
+            result = self.execute(actions=[action])
+            time.sleep(self.config.step_interval_time)
+
+            if result in (Status.SUCCESS, Status.FAILURE):
+                return result
+
+        return Status.SUCCESS
+
+    def _execute_direct_fallback(self, instruction: str):
+        """Fallback: run_direct.py-style patterns when no skill matches."""
+        task = instruction
+        self.logger.info(LogMessage(
+            type="direct_fallback",
+            message=f"No skill matched. Using direct patterns for: {task}",
+        ))
+        patterns = [
+            (r"^open\s+(.+)", self._direct_open_app),
+            (r"^打开\s*(.+)", self._direct_open_app),
+            (r"^launch\s+(.+)", self._direct_open_app),
+            (r"^search\s+(.+)", self._direct_search),
+            (r"^搜索\s*(.+)", self._direct_search),
+            (r"^notepad\s*(.*)", self._direct_notepad),
+            (r"^记事本\s*(.*)", self._direct_notepad),
+            (r"^calc\s*(.*)", self._direct_calc),
+            (r"^计算器\s*(.*)", self._direct_calc),
+        ]
+        for pattern, handler in patterns:
+            m = re.match(pattern, task, re.IGNORECASE)
+            if m:
+                return handler(m)
+        self.logger.info(LogMessage(
+            type="no_match",
+            message=f"No direct pattern matched for: {task}",
+        ))
+        return Status.FAILURE
+
+    def _direct_open_app(self, match):
+        app = match.group(1).strip()
+        self.logger.info(LogMessage(type="direct", message=f"Opening app: {app}"))
+        pyautogui.hotkey("win")
+        time.sleep(0.5)
+        pyautogui.write(app, interval=0.05)
+        time.sleep(0.5)
+        pyautogui.press("enter")
+        return Status.SUCCESS
+
+    def _direct_search(self, match):
+        query = match.group(1).strip()
+        self.logger.info(LogMessage(type="direct", message=f"Searching: {query}"))
+        pyautogui.hotkey("win")
+        time.sleep(0.5)
+        pyautogui.write(query, interval=0.05)
+        time.sleep(0.5)
+        pyautogui.press("enter")
+        return Status.SUCCESS
+
+    def _direct_notepad(self, match):
+        text = match.group(1).strip()
+        self.logger.info(LogMessage(type="direct", message="Opening Notepad"))
+        pyautogui.hotkey("win")
+        time.sleep(0.5)
+        pyautogui.write("notepad", interval=0.05)
+        time.sleep(0.5)
+        pyautogui.press("enter")
+        time.sleep(1.0)
+        if text:
+            pyautogui.write(text, interval=0.05)
+        return Status.SUCCESS
+
+    def _direct_calc(self, match):
+        expr = match.group(1).strip()
+        self.logger.info(LogMessage(type="direct", message="Opening Calculator"))
+        pyautogui.hotkey("win")
+        time.sleep(0.5)
+        pyautogui.write("calculator", interval=0.05)
+        time.sleep(0.5)
+        pyautogui.press("enter")
+        if expr:
+            time.sleep(1.0)
+            pyautogui.write(expr, interval=0.05)
+            pyautogui.press("enter")
+        return Status.SUCCESS
 
     def proceed(self, instruction, example, explicit_log_dir, env=None, cancel_event=None, **kwargs):
         # Set up the environment
@@ -68,11 +212,11 @@ class CUARAGAgent:
                 },
             )
         )
-        time.sleep(10)
+        time.sleep(3)
         self.logger.info(
             LogMessage(
                 type="wait for environment ready",
-                message=f"Wait 10s to make sure the environment is completely ready...",
+                message="Wait 3s for environment ready...",
             )
         )
         observation = self.env.get_observation()
@@ -95,98 +239,32 @@ class CUARAGAgent:
 
 
 
-        attempt_start_time = time.time()
-        task_status = Status.IN_PROGRESS
-        first_loop_flag = True
-        while True:
-            if self.termination(task_status, cancel_event, attempt_start_time):
-                return task_status
-            observation = self.env.get_observation()
-            screenshot = observation["screenshot"]
-            if first_loop_flag:
-                feasibility = self.planner.predict_task_feasibility(screenshot)
-                if not feasibility:
-                    self.logger.info(
-                        LogMessage(
-                            type="agent_termination",
-                            message=f"Task is predicted to be infeasible. Terminating the agent.",
-                        )
-                    )
-                    task_status = Status.CALL_USER
-                    return task_status
-                first_loop_flag = False
-            current_operation_class, step_description, is_base_action = (
-                self.planner.retrieve_next_step(screenshot)
-            )
+        # ---- Primary path: match instruction to a composed action (skill) ----
+        self.logger.info(LogMessage(
+            type="skill_matching",
+            message=f"Matching instruction: '{instruction}'",
+        ))
+        match_result = match_instruction(instruction)
 
-            if current_operation_class is None:
-                break
+        if match_result is not None:
+            skill_class, params = match_result
+            self.logger.info(LogMessage(
+                type="skill_matched",
+                message=f"Matched: {skill_class.__name__} params={params}",
+            ))
+            result = self._execute_skill(skill_class, params, cancel_event)
+            self.logger.info(LogMessage(
+                type="skill_result",
+                message=f"Skill execution result: {result}",
+            ))
+            return
 
-            if is_base_action:
-                action = self.planner.config_next_step(
-                    current_operation_class, screenshot, step_description
-                )
-
-                if (
-                    hasattr(current_operation_class(), "require_grounding")
-                    and current_operation_class().require_grounding
-                ):
-                    self.logger.info(
-                        LogMessage(
-                            type="mixture_grounding",
-                            message=f"{self.name} [yellow]refining coordinates[/yellow] for action: {action.type}",
-                        )
-                    )
-
-                    observation = self.env.get_observation()
-                    action.call_grounding_model(
-                                grounding_expertise=self.mixture_grounding,
-                                observation=observation
-                            )
-                self.execute(actions=[action])
-                time.sleep(self.config.step_interval_time)
-                continue
-
-            else:
-                current_operation = self.planner.config_next_step(
-                    current_operation_class, screenshot, step_description
-                )
-                current_operation.configure_from_env(env=self.env)
-
-                self.logger.info(
-                    LogMessage(
-                        type="agent_operation_start",
-                        message=f"Starting Operation",
-                    )
-                )
-
-                while True:
-                    action = current_operation.step(edge_name_pref="hotkey")
-
-                    if (
-                        hasattr(action, "require_grounding")
-                        and action.require_grounding
-                    ):
-                        self.logger.info(
-                            LogMessage(
-                                type="mixture_grounding",
-                                message=f"{self.name} [yellow]refining coordinates[/yellow] for action: {action.type}",
-                            )
-                        )
-
-                        observation = self.env.get_observation()
-                        action.call_grounding_model(
-                                grounding_expertise=self.mixture_grounding,
-                                observation=observation
-                            )
-
-                    self.execute(actions=[action])
-                    time.sleep(self.config.step_interval_time)
-
-                    if action is None:
-                        break
-
-        # self.logger.convert()
+        # ---- Fallback: direct patterns (no skill match) ----
+        self.logger.info(LogMessage(
+            type="fallback",
+            message="No skill matched, trying direct patterns.",
+        ))
+        self._execute_direct_fallback(instruction)
 
 
     def termination(

@@ -94,6 +94,8 @@ class DesktopEnv:
         screenshot = pyautogui.screenshot()
         if target_resolution is not None:
             screenshot = screenshot.resize(target_resolution)
+        else:
+            screenshot = screenshot.resize((1280, 720))
         width, height = screenshot.size
         return {
             "screenshot": screenshot,

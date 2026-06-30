@@ -1,21 +1,38 @@
 
-from openai import omit, AuthenticationError
-from dotenv import load_dotenv
-from openai import AzureOpenAI
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-from pathlib import Path
+
 import os
 import base64
 import time
-from transformers import AutoModelForImageTextToText, AutoProcessor
+import requests
+
+try:
+    from openai import omit, AuthenticationError
+    from dotenv import load_dotenv
+    from openai import AzureOpenAI
+    from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+    _HAS_AZURE = True
+except ImportError:
+    _HAS_AZURE = False
+
+try:
+    from transformers import AutoModelForImageTextToText, AutoProcessor
+    _HAS_TRANSFORMERS = True
+except ImportError:
+    _HAS_TRANSFORMERS = False
 
 
 
 def model_loader(config):
     if config.planner.model_class == "gpt":
+        if not _HAS_AZURE:
+            raise ImportError("Azure OpenAI SDK not installed. Run: pip install openai python-dotenv azure-identity")
         return GPT(config)
     if config.planner.model_class == "qwen":
+        if not _HAS_TRANSFORMERS:
+            raise ImportError("transformers not installed. Run: pip install transformers")
         return Qwen(config)
+    if config.planner.model_class == "ollama":
+        return Ollama(config)
     raise NotImplementedError("the selected model class is not implemented")
 
 
@@ -212,7 +229,66 @@ class Qwen:
             generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
         )
         return output_text[0]
-    
+
+
+class Ollama:
+    """Ollama local model client — uses OpenAI-compatible /v1/chat/completions endpoint."""
+
+    def __init__(self, config):
+        self.config = config
+        self.model_name = self.config.planner.expertises.ollama.model_name
+        api_base = getattr(self.config.planner.expertises.ollama, "api_base", None)
+        if api_base is None:
+            api_base = "http://localhost:11434"
+        self.api_base = api_base.rstrip("/")
+        self.chat_url = f"{self.api_base}/v1/chat/completions"
+
+    def _encode_image(self, image):
+        """Convert image (path / bytes / base64 str) to raw base64 (no data-uri prefix)."""
+        if isinstance(image, str) and os.path.isfile(image):
+            with open(image, "rb") as f:
+                return base64.b64encode(f.read()).decode("utf-8")
+        if isinstance(image, bytes):
+            return base64.b64encode(image).decode("utf-8")
+        if image.startswith("data:image/"):
+            return image.split(",", 1)[1]
+        return image
+
+    def create_text_image_message(self, text, image):
+        if not isinstance(image, list):
+            image = [image]
+        # qwen2.5vl handles 1 image reliably; use the first only
+        b64 = self._encode_image(image[0])
+        content = [
+            {"type": "text", "text": text},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+        ]
+        return {"role": "user", "content": content}
+
+    def create_text_message(self, text):
+        return {"role": "user", "content": text}
+
+    def get_completion(self, messages):
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "max_tokens": 4096,
+            "temperature": 0.0,
+        }
+        try:
+            resp = requests.post(self.chat_url, json=payload, timeout=300, proxies={"http": None, "https": None})
+            if not resp.ok:
+                detail = resp.text[:500]
+                raise RuntimeError(
+                    f"Ollama API error {resp.status_code}: {detail}\n"
+                    f"Model: {self.model_name}"
+                )
+            return resp.json()["choices"][0]["message"]["content"]
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError(
+                f"Cannot connect to Ollama at {self.api_base}. Is Ollama running?"
+            )
+
 
 if __name__ == "__main__":
     image_path = "../WindowsAgentArena/img/architecture-azure.png"

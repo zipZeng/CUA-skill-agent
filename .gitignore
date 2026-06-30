@@ -422,4 +422,4 @@ asset/images
 agent/asset
 result.csv
 evaluation/WindowsAgentArena/*.csv
-evaluation/WindowsAgentArena/test_jsons/test_one.json
+evaluation/WindowsAgentArena/test_jsons/test_one.jsonresults/
