@@ -1,0 +1,2 @@
+# GGUF weights downloaded by scripts/setup_ollama.ps1 (do not commit)
+*.gguf

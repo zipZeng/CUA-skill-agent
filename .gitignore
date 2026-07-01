@@ -415,6 +415,9 @@ asset/rag_index/*
 *.egg-info
 rag/*.ipynb
 
+# Ollama model weights (downloaded locally by scripts/setup_ollama.ps1)
+scripts/models/*.gguf
+
 # Large asset files
 asset/files
 asset/powerpoints

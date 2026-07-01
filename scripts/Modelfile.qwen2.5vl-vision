@@ -1,0 +1,12 @@
+# CUA-Skill Agent — Ollama vision model
+# Built by scripts/setup_ollama.ps1
+#
+# Downloads (HuggingFace chatpig/qwen2.5-vl-7b-it-gguf):
+#   qwen2.5-vl-7b-it-q4_k_m.gguf      (~4.4 GB)
+#   mmproj-qwen2.5-vl-7b-it-q4_0.gguf  (~580 MB)
+
+FROM ./qwen2.5-vl-7b-it-q4_k_m.gguf
+FROM ./mmproj-qwen2.5-vl-7b-it-q4_0.gguf
+
+PARAMETER num_ctx 8192
+PARAMETER temperature 0.1
