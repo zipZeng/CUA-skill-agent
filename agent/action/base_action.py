@@ -8,10 +8,55 @@ import subprocess
 import shlex
 import itertools
 import threading
+import os
+import shutil
 from .argument import Argument
 import ast
 
 # ---------- BASE Action ----------
+
+_EXECUTABLE_CANDIDATES: Dict[str, List[str]] = {
+    "chrome.exe": [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ],
+    "msedge.exe": [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    ],
+    "winword.exe": [
+        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\root\Office16\WINWORD.EXE",
+    ],
+    "excel.exe": [
+        r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\root\Office16\EXCEL.EXE",
+    ],
+    "powerpnt.exe": [
+        r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\root\Office16\POWERPNT.EXE",
+    ],
+    "vlc.exe": [
+        r"C:\Program Files\VideoLAN\VLC\vlc.exe",
+        r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
+    ],
+}
+
+
+def resolve_executable(command: str) -> str:
+    """Resolve bare exe names to full paths (Chrome/Edge/Office are not on PATH)."""
+    if not command or command.endswith(":"):
+        return command
+    if os.path.isfile(command):
+        return command
+    found = shutil.which(command)
+    if found:
+        return found
+    key = os.path.basename(command).lower()
+    for path in _EXECUTABLE_CANDIDATES.get(key, []):
+        if os.path.isfile(path):
+            return path
+    return command
 
 _OP_REGISTRY: Dict[str, Type["BaseAction"]] = {}
 
@@ -40,6 +85,7 @@ EXECUTABLE_ACTIONS = {
     "PasteAction",
     "SwitchWindowAction",
     "WaitAction",
+    "LaunchProcessAction",
     "FinishAction",
     "ErrorEnvAction",
     "CallUserAction",
@@ -504,6 +550,24 @@ class ScrollAction(BaseAction):
             )
 
 
+@register("LaunchProcessAction")
+class LaunchProcessAction(BaseAction):
+    type: str = "launch_process"
+    command: Argument = Argument(
+        value="",
+        description="Executable or URI to launch."
+    )
+
+    def __init__(self, thought: str = "", command: str = "", **kwargs):
+        super().__init__(thought=thought, command=resolve_executable(command), **kwargs)
+
+    def get_gui_code(self) -> str:
+        cmd = self.command.value
+        if cmd.endswith(":"):
+            return f"import os\nos.startfile({repr(cmd)})"
+        return f"import subprocess\nsubprocess.Popen({repr(cmd)})"
+
+
 @register("TypeAction")
 class TypeAction(BaseAction):
     type: str = "type"
@@ -561,6 +625,10 @@ class TypeAction(BaseAction):
                 pyautogui_code += "\npyautogui.hotkey('ctrl', 'v')"
             if i < len(lines) - 1 and self.end_with_enter.value:
                 pyautogui_code += "\npyautogui.press('enter')"
+
+        if lines and self.end_with_enter.value:
+            pyautogui_code += "\nimport time\ntime.sleep(0.3)"
+            pyautogui_code += "\npyautogui.press('enter')"
 
         return pyautogui_code
 

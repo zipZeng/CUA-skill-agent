@@ -2,7 +2,7 @@
 from typing import Any, Dict, List
 
 from .compose_action import BaseComposeAction
-from .base_action import register, DummyAction, SingleClickAction, HotKeyAction, WaitAction, TypeAction, PressKeyAction, KeyDownAction, KeyUpAction
+from .base_action import register, DummyAction, SingleClickAction, HotKeyAction, WaitAction, TypeAction, PressKeyAction, KeyDownAction, KeyUpAction, LaunchProcessAction
 from .argument import Argument
 
 @register("OpenWindowsMenu")
@@ -49,9 +49,23 @@ class OpenRun(BaseComposeAction):
             "hotkey_win_r",
             path=[
                 HotKeyAction(keys=["win", "r"], thought="Press the Windows + R keys on the keyboard to open the Run dialog."),
-                WaitAction(duration=1.0)
+                WaitAction(duration=0.5)
             ]
         )
+
+
+EXECUTABLE_COMMANDS: Dict[str, str] = {
+    "Notepad": "notepad.exe",
+    "Calculator": "calc.exe",
+    "Word": "winword.exe",
+    "Excel": "excel.exe",
+    "PowerPoint": "powerpnt.exe",
+    "Microsoft Edge": "msedge.exe",
+    "Chrome": "chrome.exe",
+    "VLC": "vlc.exe",
+    "Paint": "mspaint.exe",
+    "Clock": "ms-clock:",
+}
 
 
 @register("LaunchApplication")
@@ -64,14 +78,18 @@ class LaunchApplication(BaseComposeAction):
 
     def __init__(self, application_name: str = "application_name", **kwargs) -> None:
         super().__init__(application_name=application_name, **kwargs)
+        launch_cmd = EXECUTABLE_COMMANDS.get(
+            self.application_name.value,
+            self.application_name.value.lower(),
+        )
         self.add_path(
-            "click_app_icon",
+            "process_launch",
             path=[
-                OpenWindowsMenu(),
+                LaunchProcessAction(
+                    command=launch_cmd,
+                    thought=f"Launch {self.application_name.value}.",
+                ),
                 WaitAction(duration=1.0),
-                TypeAction(text=self.application_name, thought=f"Type the application name '{self.application_name}' to search for it."),
-                WaitAction(duration=1.0),
-                SingleClickAction(thought=f"Click on the icon for '{self.application_name}' to launch it."),
             ]
         )
 
