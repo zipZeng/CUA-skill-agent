@@ -63,8 +63,8 @@ class AgentApp:
         self._setup_styles()
 
         # 主容器
-        main = tk.Frame(self.root, bg=BG, padx=16, pady=16)
-        main.pack(fill=tk.BOTH, expand=True)
+        main = tk.Frame(self.root, bg=BG)
+        main.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
 
         # ── 标题栏 ──
         header = tk.Frame(main, bg=BG)
@@ -80,16 +80,16 @@ class AgentApp:
         input_card.pack(fill=tk.X, pady=(0, 10))
 
         # 输入区标题
-        input_header = tk.Frame(input_card, bg=CARD_BG, padx=14, pady=(12, 6))
-        input_header.pack(fill=tk.X)
+        input_header = tk.Frame(input_card, bg=CARD_BG)
+        input_header.pack(fill=tk.X, padx=14, pady=(12, 6))
         tk.Label(input_header, text="输入指令",
                  font=("Microsoft YaHei UI", 11, "bold"), fg=TEXT, bg=CARD_BG).pack(side=tk.LEFT)
         tk.Label(input_header, text="Enter 发送，支持复合指令与 Agent 模式",
                  font=(FONT_CJK[0], 9), fg=TEXT_SEC, bg=CARD_BG).pack(side=tk.LEFT, padx=8)
 
         # 多行输入框
-        input_body = tk.Frame(input_card, bg=CARD_BG, padx=14)
-        input_body.pack(fill=tk.X)
+        input_body = tk.Frame(input_card, bg=CARD_BG)
+        input_body.pack(fill=tk.X, padx=14)
         self.cmd_entry = tk.Text(
             input_body,
             font=("Microsoft YaHei UI", 12),
@@ -112,8 +112,8 @@ class AgentApp:
         self.cmd_entry.focus_set()
 
         # 快捷指令标签
-        quick_frame = tk.Frame(input_card, bg=CARD_BG, padx=14, pady=(8, 12))
-        quick_frame.pack(fill=tk.X)
+        quick_frame = tk.Frame(input_card, bg=CARD_BG)
+        quick_frame.pack(fill=tk.X, padx=14, pady=(8, 12))
         tk.Label(quick_frame, text="快捷:", font=(FONT_CJK[0], 9),
                  fg=TEXT_SEC, bg=CARD_BG).pack(side=tk.LEFT)
         for label, cmd in [
@@ -163,14 +163,14 @@ class AgentApp:
                            highlightbackground="#e2e8f0")
         log_card.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
-        log_header = tk.Frame(log_card, bg=CARD_BG, padx=14, pady=(10, 6))
-        log_header.pack(fill=tk.X)
+        log_header = tk.Frame(log_card, bg=CARD_BG)
+        log_header.pack(fill=tk.X, padx=14, pady=(10, 6))
         tk.Label(log_header, text="执行日志",
                  font=("Microsoft YaHei UI", 11, "bold"), fg=TEXT, bg=CARD_BG).pack(side=tk.LEFT)
 
         # 日志文本框
-        log_body = tk.Frame(log_card, bg=CARD_BG, padx=14, pady=(0, 12))
-        log_body.pack(fill=tk.BOTH, expand=True)
+        log_body = tk.Frame(log_card, bg=CARD_BG)
+        log_body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 12))
 
         self.log_area = tk.Text(
             log_body,
