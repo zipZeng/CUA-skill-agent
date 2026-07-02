@@ -227,7 +227,8 @@ class AgentApp:
         def on_done(message):
             pass
 
-        result = agent.run(goal, on_step=on_step, on_done=on_done)
+        result = agent.run(goal, on_step=on_step, on_done=on_done,
+                          should_stop=lambda: not self._running)
 
         elapsed_ms = int((time.time() - t_start) * 1000)
         success = not result.startswith("失败")

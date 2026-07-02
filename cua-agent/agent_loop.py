@@ -35,19 +35,21 @@ AGENT_SYSTEM_PROMPT = """你是一个 Windows 桌面自动化助手。你能"看
 - {"action": "type", "text": "内容"}              — 输入文字
 - {"action": "hotkey", "keys": ["ctrl", "c"]}     — 组合键
 - {"action": "press", "key": "enter"}             — 按单键
-- {"action": "scroll", "amount": -3}              — 滚动（负数=向下）
+- {"action": "scroll", "amount": -3}              — 滚动（负数=向下，正数=向上）
 - {"action": "wait", "seconds": 2}                — 等待秒数
 - {"action": "done", "message": "完成了什么"}      — 任务完成
 - {"action": "fail", "reason": "原因"}             — 无法完成
 
-## 规则
+## 重要规则
 
-1. target 必须从当前屏幕文字中选择（大小写可以不同，但要匹配屏幕实际内容）
-2. 每次只做一个操作，不要一步跳过多步
-3. 如果弹窗/广告出现，优先关闭它
-4. 如果找不到目标文字，可以试试滚动或用相近文字
-5. 任务完成后返回 done，无法完成返回 fail
-6. 只返回 JSON，不要其他文字"""
+1. target 必须从屏幕文字中精确选择，不要编造不存在的文字
+2. 如果目标文字不在列表中，尝试 scroll 向下滚动后再找
+3. 弹窗/广告优先关闭（找"关闭""×""取消""我知道了"）
+4. 不要点击窗口菜单栏（如"文件""系统""交易""工具"等），要找页面主体内容区
+5. y 坐标大于 100 的文字通常在页面主体区域，y < 50 的多是菜单栏
+6. 如果重复操作无效（如连续点击同一位置），换一种方式
+7. 每步只做一个操作，任务完成后返回 done
+8. 只返回 JSON，不要其他文字"""
 
 
 class AgentLoop:
@@ -61,24 +63,34 @@ class AgentLoop:
 
     def run(self, goal: str,
             on_step: callable = None,
-            on_done: callable = None) -> str:
+            on_done: callable = None,
+            should_stop: callable = None) -> str:
         """执行 Agent 循环，返回最终消息。
 
         on_step(step_num, action_json) — 每步执行前回调
         on_done(message)               — 完成时回调
+        should_stop() → bool           — 返回 True 时中止循环
         """
         history: list[dict] = []
         last_ocr_texts: list[str] = []
 
         for step_num in range(1, MAX_STEPS + 1):
+            # 检查停止标志
+            if should_stop and should_stop():
+                print("[Agent] 用户取消")
+                if on_done:
+                    on_done("用户取消")
+                return "用户取消"
+
             # 1. 截图 + OCR
             img = self.wm.screenshot()
             all_texts = self.locator._ocr_recognize(img)
 
-            # 截断过长的 OCR 列表（优先保留屏幕上半部分的文字）
+            # 截断过长的 OCR 列表（沿屏幕高度均匀采样，避免只看到顶部菜单栏）
             if len(all_texts) > MAX_OCR_ITEMS:
                 all_texts.sort(key=lambda x: x[1][1])  # 按 y 排序
-                all_texts = all_texts[:MAX_OCR_ITEMS]
+                step = len(all_texts) / MAX_OCR_ITEMS
+                all_texts = [all_texts[int(i * step)] for i in range(MAX_OCR_ITEMS)]
 
             ocr_lines = []
             for text, (x1, y1, x2, y2) in all_texts:
