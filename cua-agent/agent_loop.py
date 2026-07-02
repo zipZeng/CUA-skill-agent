@@ -74,8 +74,10 @@ class AgentLoop:
         history: list[dict] = []
         last_ocr_texts: list[str] = []
 
+        # 从目标中提取关键词，用于 OCR 采样加权
+        goal_keywords = self._extract_keywords(goal)
+
         for step_num in range(1, MAX_STEPS + 1):
-            # 检查停止标志
             if should_stop and should_stop():
                 print("[Agent] 用户取消")
                 if on_done:
@@ -86,11 +88,20 @@ class AgentLoop:
             img = self.wm.screenshot()
             all_texts = self.locator._ocr_recognize(img)
 
-            # 截断过长的 OCR 列表（沿屏幕高度均匀采样，避免只看到顶部菜单栏）
+            # 均匀采样，但保留包含目标关键词的项
             if len(all_texts) > MAX_OCR_ITEMS:
                 all_texts.sort(key=lambda x: x[1][1])  # 按 y 排序
-                step = len(all_texts) / MAX_OCR_ITEMS
-                all_texts = [all_texts[int(i * step)] for i in range(MAX_OCR_ITEMS)]
+                # 先提取匹配关键词的项（最多 20 个）
+                boosted = [t for t in all_texts
+                          if any(kw in t[0] for kw in goal_keywords)]
+                boosted = boosted[:20]
+                # 剩余名额均匀采样
+                remaining = MAX_OCR_ITEMS - len(boosted)
+                others = [t for t in all_texts if t not in boosted]
+                if len(others) > remaining:
+                    gap = len(others) / remaining
+                    others = [others[int(i * gap)] for i in range(remaining)]
+                all_texts = boosted + others
 
             ocr_lines = []
             for text, (x1, y1, x2, y2) in all_texts:
@@ -98,13 +109,16 @@ class AgentLoop:
                 ocr_lines.append(f'  "{text}" @({cx}, {cy})')
             ocr_block = "\n".join(ocr_lines)
 
-            # 调试输出：前 15 个采样文字
-            print(f"[Agent OCR] 采样 {len(all_texts)} 项，前15个:")
+            # 调试输出
+            if boosted:
+                print(f"[Agent OCR] 采样 {len(all_texts)} 项 (含 {len(boosted)} 项关键词匹配), 前15个:")
+            else:
+                print(f"[Agent OCR] 采样 {len(all_texts)} 项, 前15个:")
             for line in ocr_lines[:15]:
                 print(line)
 
             # 2. 构建 prompt
-            history_text = self._format_history(history[-6:])  # 最近 6 步
+            history_text = self._format_history(history[-6:])
 
             user_prompt = f"""用户目标: {goal}
 
@@ -120,7 +134,20 @@ class AgentLoop:
             if on_step:
                 on_step(step_num, None)
 
+            if should_stop and should_stop():
+                print("[Agent] 用户取消 (模型调用前)")
+                if on_done:
+                    on_done("用户取消")
+                return "用户取消"
+
             response = self._call_model(user_prompt)
+
+            if should_stop and should_stop():
+                print("[Agent] 用户取消 (模型调用后)")
+                if on_done:
+                    on_done("用户取消")
+                return "用户取消"
+
             action = self._parse_response(response)
 
             if action is None:
@@ -177,7 +204,7 @@ class AgentLoop:
                     "stream": False,
                     "options": {"temperature": 0.1},
                 },
-                timeout=60,
+                timeout=30,
             )
             data = resp.json()
             return data.get("message", {}).get("content", "")
@@ -265,6 +292,14 @@ class AgentLoop:
         if not coord:
             raise RuntimeError(f"未找到目标: '{target}'")
         return coord
+
+    def _extract_keywords(self, goal: str) -> list[str]:
+        """从目标文本中提取关键词，用于 OCR 采样加权。"""
+        stop = {'帮我', '打开', '点击', '找到', '下载', '所有', '数据', '到',
+                '的', '在', '了', '，', '再', '然后', '本地', '和', '请',
+                '一个', '这个', '那个', '里面', '下面', '上面', '把', '用'}
+        words = re.findall(r'[一-鿿\w]+', goal)
+        return [w for w in words if w not in stop and len(w) >= 2]
 
     # ── 工具 ────────────────────────────────────────────────────
 
