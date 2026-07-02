@@ -125,17 +125,36 @@ class ElementLocator:
     def _ocr_find(self, image: Image.Image, target: str) -> Optional[tuple[int, int]]:
         """OCR 识别截图 → 模糊匹配目标文字 → 返回中心坐标。"""
         results = self._ocr_recognize(image)
-        best, best_score = None, self.config.ocr_fuzzy_threshold
+        best, best_score, best_text = None, self.config.ocr_fuzzy_threshold, ""
 
         for text, bbox in results:
             score = self._match_score(target, text)
             if score > best_score:
                 best_score = score
                 best = bbox
+                best_text = text
 
         if best:
             x1, y1, x2, y2 = best
-            return ((x1 + x2) // 2, (y1 + y2) // 2)
+            y_center = (y1 + y2) // 2
+            bbox_w = x2 - x1
+
+            # 子串匹配时根据 target 在 OCR 文字中的位置偏移 x 坐标
+            t_lower = target.lower()
+            o_lower = best_text.lower()
+            if t_lower in o_lower and len(o_lower) > len(t_lower):
+                idx = o_lower.index(t_lower)
+                char_w = bbox_w / len(o_lower) if len(o_lower) > 0 else bbox_w
+                target_center_x = int(x1 + char_w * (idx + len(target) / 2))
+            else:
+                target_center_x = (x1 + x2) // 2
+
+            coord = (target_center_x, y_center)
+            if best_score < 0.9:
+                print(f"[OCR] 模糊匹配 target='{target}' → ocr_text='{best_text}' score={best_score:.2f} @{coord}")
+            else:
+                print(f"[OCR] 匹配 target='{target}' → ocr_text='{best_text}' @{coord}")
+            return coord
         return None
 
     def _ocr_find_all(self, image: Image.Image, target: str) -> list[tuple[int, int]]:

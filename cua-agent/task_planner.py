@@ -166,8 +166,12 @@ class TaskPlanner:
         steps = []
         action = intent.action
         query = intent.query
+        targets = intent.params.get("targets", [])
 
-        if action == "click" and query:
+        if action == "click" and targets:
+            for t in targets:
+                steps.append(Step(type="click", target=t))
+        elif action == "click" and query:
             steps.append(Step(type="click", target=query))
         elif action == "type" and query:
             steps.append(Step(type="type", text=query))

@@ -115,13 +115,18 @@ class ActionExecutor:
             log.target_text = step.target
             log.screenshot_path = self._screenshot()
 
-            # OCR 定位
-            img = self.wm.screenshot()
-            coord = self.locator.find_text(img, step.target, step.fallback)
+            # OCR 定位（轮询等待目标出现）
+            deadline = time.time() + self.config.target_appear_timeout
+            coord = None
+            while time.time() < deadline:
+                img = self.wm.screenshot()
+                coord = self.locator.find_text(img, step.target, step.fallback)
+                if coord:
+                    break
+                time.sleep(0.5)
 
             if not coord:
-                # 策略3预留：视觉模型兜底
-                raise RuntimeError(f"未找到目标: '{step.target}'")
+                raise RuntimeError(f"未找到目标: '{step.target}' (等待 {self.config.target_appear_timeout:.0f}s)")
 
             log.found_coord = coord
 

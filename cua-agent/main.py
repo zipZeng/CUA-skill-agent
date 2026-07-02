@@ -164,18 +164,6 @@ class AgentApp:
                 hwnd = self.executor.wm.find_window(keywords)
 
             try:
-                # 截图为可选（有 target 才截图做 OCR）
-                if step.target:
-                    log.screenshot_path = self._screenshot(self.executor)
-                    img = self.executor.wm.screenshot()
-                    coord = self.executor.locator.find_text(
-                        img, step.target, step.fallback,
-                    )
-                    if coord:
-                        log.found_coord = coord
-                    else:
-                        raise RuntimeError(f"未找到目标: '{step.target}'")
-
                 self.executor._execute_one(step, hwnd, log, keywords)
                 log.elapsed_ms = int((time.time() - t_step) * 1000)
                 self._put_msg(("step_ok", log))
@@ -198,15 +186,6 @@ class AgentApp:
             "bold",
         )))
         self._put_msg(("done", None))
-
-    def _screenshot(self, executor) -> str:
-        """截图保存，返回路径。"""
-        import os
-        ts = datetime.now().strftime("%H%M%S_%f")[:-3]
-        path = os.path.join(self.executor.config.screenshot_dir, f"gui_{ts}.png")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        executor.wm.screenshot().save(path)
-        return path
 
     # ── 消息队列（子线程 → GUI）────────────────────────────────
 

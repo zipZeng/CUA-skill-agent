@@ -171,15 +171,24 @@ class WindowManager:
     # ── 鼠标操作 ──────────────────────────────────────────────
 
     def click(self, x: int, y: int, button: str = "left") -> None:
-        """在绝对屏幕坐标点击。"""
+        """在绝对屏幕坐标点击（先移动再点击，确保动作可见）。"""
+        print(f"[Click] {button} @({x}, {y})")
+        pyautogui.moveTo(x, y, duration=0.15)
+        time.sleep(0.05)
         pyautogui.click(x, y, button=button)
 
     def right_click(self, x: int, y: int) -> None:
         """右键点击。"""
+        print(f"[Click] right @({x}, {y})")
+        pyautogui.moveTo(x, y, duration=0.15)
+        time.sleep(0.05)
         pyautogui.click(x, y, button="right")
 
     def double_click(self, x: int, y: int) -> None:
         """双击。"""
+        print(f"[Click] double @({x}, {y})")
+        pyautogui.moveTo(x, y, duration=0.15)
+        time.sleep(0.05)
         pyautogui.doubleClick(x, y)
 
     # ── 键盘操作 ──────────────────────────────────────────────

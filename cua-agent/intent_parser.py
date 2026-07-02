@@ -35,6 +35,9 @@ _ACTION_RULES: list[tuple[str, str]] = [
     (r"截图|screenshot|截屏",           "screenshot"),
 ]
 
+# 复合指令连接词（"点击A，再B" → ["A", "B"]）
+_COMPOUND_SEP = re.compile(r'[，,、]\s*(?:再|然后|接着|并|以及|和|再点击|再按|再点)\s*')
+
 # ── 应用别名（关键词 → 标准化名称）────────────────────────────
 
 _APP_ALIASES: dict[str, list[str]] = {
@@ -59,6 +62,14 @@ def _match_action(text: str) -> str:
         if re.search(pattern, text, re.IGNORECASE):
             last_action = action
     return last_action
+
+
+def _split_compound_targets(text: str) -> list[str]:
+    """拆分复合指令中的多个点击目标。
+    "游客登录，再沪深京排行" → ["游客登录", "沪深京排行"]
+    """
+    parts = _COMPOUND_SEP.split(text)
+    return [p.strip().strip("，,。. ") for p in parts if p.strip().strip("，,。. ")]
 
 
 def _match_app(text: str) -> Optional[str]:
@@ -109,14 +120,17 @@ class IntentParser:
         app = _match_app(text)
         query = _extract_query(text, action) if action in ("search", "type", "click", "navigate") else ""
 
-        if action == "launch" and not query:
-            # "打开Chrome" → query 就是 app 名
-            pass
+        params = {}
+        if action == "click" and query:
+            targets = _split_compound_targets(query)
+            if len(targets) > 1:
+                params["targets"] = targets
 
         return Intent(
             action=action,
             app=app or "",
             query=query,
+            params=params,
         )
 
     def _slow_parse(self, text: str) -> Intent:

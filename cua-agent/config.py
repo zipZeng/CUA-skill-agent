@@ -12,7 +12,7 @@ class Config:
     # ── 元素定位 ──
     ocr_lang: str = "ch"           # PaddleOCR 语言
     ocr_min_confidence: float = 0.5  # OCR 最低置信度
-    ocr_fuzzy_threshold: float = 0.6  # 模糊匹配阈值
+    ocr_fuzzy_threshold: float = 0.75  # 模糊匹配阈值
 
     # ── 小模型 ──
     ollama_base_url: str = "http://localhost:11434"
@@ -23,6 +23,7 @@ class Config:
     step_timeout: float = 30.0      # 单步操作最大等待
     post_action_delay: float = 0.3  # 操作后等待
     window_load_delay: float = 3.0  # 启动应用后等待
+    target_appear_timeout: float = 10.0  # OCR 目标出现最大等待
     dialog_timeout: float = 10.0    # 对话框出现等待
     max_retries: int = 3            # 单步最大重试
 
