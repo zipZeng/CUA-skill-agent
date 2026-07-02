@@ -32,8 +32,8 @@ LOG_OK   = "#4ade80"   # 日志-成功
 LOG_FAIL = "#f87171"   # 日志-失败
 LOG_INFO = "#94a3b8"   # 日志-信息
 
-FONT_CJK = ("Microsoft YaHei UI", 10)
-FONT_MONO = ("Cascadia Code", 9)
+FONT_CJK = ("Microsoft YaHei UI", 11)
+FONT_MONO = ("Cascadia Code", 10)
 
 
 class AgentApp:
@@ -56,8 +56,8 @@ class AgentApp:
     def _build_ui(self):
         self.root = tk.Tk()
         self.root.title("CUA-Skill 桌面 Agent")
-        self.root.geometry("960x680")
-        self.root.minsize(700, 500)
+        self.root.geometry("1100x800")
+        self.root.minsize(800, 600)
         self.root.configure(bg=BG)
 
         self._setup_styles()
@@ -92,8 +92,8 @@ class AgentApp:
         input_body.pack(fill=tk.X, padx=14)
         self.cmd_entry = tk.Text(
             input_body,
-            font=("Microsoft YaHei UI", 12),
-            height=3,
+            font=("Microsoft YaHei UI", 13),
+            height=4,
             relief=tk.FLAT,
             wrap=tk.WORD,
             fg=TEXT,
