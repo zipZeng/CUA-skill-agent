@@ -1,0 +1,12 @@
+# 桌面操控
+pyautogui
+pywin32
+pyperclip
+Pillow
+
+# OCR 引擎（RapidOCR = PaddleOCR 的 ONNX 版，纯 Python，零额外依赖）
+rapidocr-onnxruntime
+opencv-python-headless
+
+# HTTP（调用 Ollama API）
+requests
