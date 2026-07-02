@@ -43,6 +43,8 @@ pip install -r requirements.txt
 
 ## 使用
 
+双击 `run.bat` 一键启动，或命令行：
+
 ```bash
 venv\Scripts\python.exe main.py
 ```
