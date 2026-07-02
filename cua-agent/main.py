@@ -12,6 +12,7 @@ import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
 from action_executor import ActionExecutor, StepLog
+from agent_loop import AgentLoop
 from config import Config
 from intent_parser import IntentParser
 from task_planner import TaskPlanner
@@ -156,6 +157,11 @@ class AgentApp:
 
             self._put_msg(("step_start", step))
 
+            # Agent 模式：交给 AgentLoop 循环处理
+            if step.type == "agent":
+                self._run_agent_step(step, keywords, logs)
+                continue
+
             # 执行单个 Step
             t_step = time.time()
             log = StepLog(step_index=len(logs), step_type=step.type)
@@ -186,6 +192,58 @@ class AgentApp:
             "bold",
         )))
         self._put_msg(("done", None))
+
+    # ── Agent 模式 ──────────────────────────────────────────────
+
+    def _run_agent_step(self, step, keywords, logs):
+        """运行 Agent 循环，将每一步反映到 GUI 日志中。"""
+        t_start = time.time()
+        goal = step.text or ""
+        self._put_msg(("log", (f"[Agent] 目标: {goal}", "bold")))
+
+        if not self.executor.config.ollama_base_url:
+            self._put_msg(("log", ("[Agent] Ollama 不可用，无法执行 Agent 任务", "fail")))
+            log = StepLog(step_index=len(logs), step_type="agent",
+                         error="Ollama 不可用", success=False)
+            logs.append(log)
+            return
+
+        agent = AgentLoop(self.executor.wm, self.executor.locator,
+                         self.executor.config)
+
+        # 如果已找到窗口，先激活
+        hwnd = None
+        if keywords:
+            hwnd = self.executor.wm.find_window(keywords)
+            if hwnd:
+                self.executor.wm.activate(hwnd)
+
+        # 跟踪 Agent 内部步数
+        agent_step_count = [0]
+
+        def on_step(step_num, _action):
+            agent_step_count[0] = step_num
+
+        def on_done(message):
+            pass
+
+        result = agent.run(goal, on_step=on_step, on_done=on_done)
+
+        elapsed_ms = int((time.time() - t_start) * 1000)
+        success = not result.startswith("失败")
+
+        if success:
+            self._put_msg(("log", (
+                f"[Agent] 完成: {result} ({agent_step_count[0]} 步, {elapsed_ms / 1000:.1f}s)",
+                "ok",
+            )))
+        else:
+            self._put_msg(("log", (f"[Agent] {result}", "fail")))
+
+        log = StepLog(step_index=len(logs), step_type="agent",
+                     elapsed_ms=elapsed_ms, success=success,
+                     error="" if success else result)
+        logs.append(log)
 
     # ── 消息队列（子线程 → GUI）────────────────────────────────
 
@@ -264,6 +322,8 @@ def step_desc(step) -> str:
         return f"等待 {step.seconds}s"
     if t == "scroll":
         return f"滚动 {step.text or ''}"
+    if t == "agent":
+        return f"AI Agent: {step.text or ''}"
     return str(t)
 
 

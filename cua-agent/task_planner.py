@@ -75,6 +75,17 @@ class TaskPlanner:
         """根据意图生成步骤序列。返回 (steps, window_keywords)。"""
         app = intent.app
 
+        # Agent 模式：把整个指令交给 Agent 循环处理
+        if intent.action == "agent":
+            step = Step(type="agent", text=intent.query or "")
+            # 如果有已知应用，先启动
+            if app:
+                template = self._match_template(app)
+                if template:
+                    launch = self._prepend_launch(template, [])
+                    return launch + [step], template.window_keywords
+            return [step], []
+
         # 策略1：模板匹配
         template = self._match_template(app)
         if template:

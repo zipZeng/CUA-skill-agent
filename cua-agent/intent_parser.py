@@ -24,11 +24,12 @@ class Intent:
 # ── 动作关键词（正则 → 动作类型）──────────────────────────────
 
 _ACTION_RULES: list[tuple[str, str]] = [
+    (r"帮我|agent|自动操作|自动完成",     "agent"),
     (r"打开|open|launch|启动|运行",     "launch"),
     (r"搜索|search|查找|搜一下",         "search"),
     (r"关闭|close|退出|关掉|×掉",        "close"),
     (r"输入|type|打字|写|键入",         "type"),
-    (r"导出|export|下载数据|保存数据",   "export"),
+    (r"导出|export|下载数据|下载|保存数据",   "export"),
     (r"点击|click|按|按下",             "click"),
     (r"导航|navigate|跳转|去",          "navigate"),
     (r"整理|organize|排列|分类",        "organize"),
@@ -56,10 +57,12 @@ _APP_ALIASES: dict[str, list[str]] = {
 
 
 def _match_action(text: str) -> str:
-    """从文本中匹配动作类型。多个匹配时取最后一个（最终目标）。"""
+    """从文本中匹配动作类型。agent 优先，其他取最后一个（最终目标）。"""
     last_action = "unknown"
     for pattern, action in _ACTION_RULES:
         if re.search(pattern, text, re.IGNORECASE):
+            if action == "agent":
+                return "agent"  # agent 最高优先级，立即返回
             last_action = action
     return last_action
 
@@ -118,7 +121,14 @@ class IntentParser:
         """关键词 + 正则匹配。"""
         action = _match_action(text)
         app = _match_app(text)
-        query = _extract_query(text, action) if action in ("search", "type", "click", "navigate") else ""
+
+        if action == "agent":
+            # Agent 模式使用原始完整指令，不做关键词剥离
+            query = text
+        elif action in ("search", "type", "click", "navigate", "export"):
+            query = _extract_query(text, action)
+        else:
+            query = ""
 
         params = {}
         if action == "click" and query:
