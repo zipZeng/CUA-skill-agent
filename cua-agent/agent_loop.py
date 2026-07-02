@@ -99,6 +99,7 @@ class AgentLoop:
             all_texts = self.locator._ocr_recognize(img)
 
             # 均匀采样，但保留包含目标关键词的项
+            boosted = []
             if len(all_texts) > MAX_OCR_ITEMS:
                 all_texts.sort(key=lambda x: x[1][1])  # 按 y 排序
                 # 先提取匹配关键词的项（最多 20 个）
@@ -317,11 +318,17 @@ class AgentLoop:
 
     def _extract_keywords(self, goal: str) -> list[str]:
         """从目标文本中提取关键词，用于 OCR 采样加权。"""
-        stop = {'帮我', '打开', '点击', '找到', '下载', '所有', '数据', '到',
-                '的', '在', '了', '，', '再', '然后', '本地', '和', '请',
-                '一个', '这个', '那个', '里面', '下面', '上面', '把', '用'}
-        words = re.findall(r'[一-鿿\w]+', goal)
-        return [w for w in words if w not in stop and len(w) >= 2]
+        stop_patterns = [
+            '帮我', '打开', '点击', '找到', '下载', '所有', '数据', '到',
+            '的', '在', '了', '再点击', '再', '然后', '本地', '和', '请',
+            '一个', '这个', '那个', '里面', '下面', '上面', '把', '用',
+            '，', '、', '。', ' ', ',',
+        ]
+        cleaned = goal
+        for sp in stop_patterns:
+            cleaned = cleaned.replace(sp, ' ')
+        parts = re.split(r'\s+', cleaned)
+        return [p for p in parts if len(p) >= 2]
 
     # ── 工具 ────────────────────────────────────────────────────
 
