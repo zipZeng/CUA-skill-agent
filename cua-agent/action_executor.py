@@ -107,7 +107,8 @@ class ActionExecutor:
         return logs
 
     def _execute_one(self, step: Step, hwnd: int | None, log: StepLog,
-                     app_keywords: list[str] = None):
+                     app_keywords: list[str] = None,
+                     should_stop: callable = None):
         """执行单个 Step。"""
 
         # ── 需要 OCR 定位的步骤 ──
@@ -119,6 +120,8 @@ class ActionExecutor:
             deadline = time.time() + self.config.target_appear_timeout
             coord = None
             while time.time() < deadline:
+                if should_stop and should_stop():
+                    raise RuntimeError("用户取消")
                 img = self.wm.screenshot()
                 coord = self.locator.find_text(img, step.target, step.fallback)
                 if coord:
@@ -170,7 +173,8 @@ class ActionExecutor:
         # ── 启动应用 ──
         elif step.type == "launch":
             self.wm.launch(step.text, app_keywords,
-                          ocr_locator=self.locator)
+                          ocr_locator=self.locator,
+                          should_stop=should_stop)
             time.sleep(self.config.post_action_delay)
 
         # ── 滚动 ──

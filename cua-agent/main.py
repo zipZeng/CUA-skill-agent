@@ -316,7 +316,8 @@ class AgentApp:
                 hwnd = self.executor.wm.find_window(keywords)
 
             try:
-                self.executor._execute_one(step, hwnd, log, keywords)
+                self.executor._execute_one(step, hwnd, log, keywords,
+                                           should_stop=lambda: not self._running)
                 log.elapsed_ms = int((time.time() - t_step) * 1000)
                 self._put_msg(("step_ok", log))
 
@@ -325,6 +326,9 @@ class AgentApp:
                 log.elapsed_ms = int((time.time() - t_step) * 1000)
                 self._put_msg(("step_fail", log))
 
+                if not self._running:
+                    self._put_msg(("log", ("执行已取消", "fail")))
+                    break
                 if not step.optional:
                     self._put_msg(("log", ("必要步骤失败，终止执行", "fail")))
                     break

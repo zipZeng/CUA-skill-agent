@@ -59,7 +59,8 @@ class WindowManager:
     # ── 启动应用 ──────────────────────────────────────────────
 
     def launch(self, app_name: str, keywords: list[str] = None,
-               wait_seconds: float = None, ocr_locator=None) -> bool:
+               wait_seconds: float = None, ocr_locator=None,
+               should_stop: callable = None) -> bool:
         """启动应用：先查窗口是否已存在，再桌面图标 OCR 双击，最后开始菜单兜底。"""
         if wait_seconds is None:
             wait_seconds = self.config.window_load_delay
@@ -76,33 +77,40 @@ class WindowManager:
 
         # 2. 桌面图标 OCR → 双击
         print(f"[Launch] 窗口未打开，尝试桌面图标 OCR, keywords={search_names}")
-        if self._launch_by_desktop_icon(search_names, wait_seconds, ocr_locator):
+        if self._launch_by_desktop_icon(search_names, wait_seconds, ocr_locator, should_stop):
             print(f"[Launch] 桌面图标启动成功")
             return True
+
+        if should_stop and should_stop():
+            raise RuntimeError("用户取消")
 
         # 3. 开始菜单兜底
         print(f"[Launch] 桌面未找到图标，回退到开始菜单搜索")
         pyautogui.hotkey("win")
-        time.sleep(0.3)
+        self._sleep(0.3, should_stop)
         pyautogui.write(app_name, interval=0.05)
-        time.sleep(0.5)
+        self._sleep(0.5, should_stop)
         pyautogui.press("enter")
-        time.sleep(wait_seconds)
+        self._sleep(wait_seconds, should_stop)
         return True
 
     def _launch_by_desktop_icon(self, keywords: list[str],
                                  wait_seconds: float,
-                                 ocr_locator=None) -> bool:
+                                 ocr_locator=None,
+                                 should_stop: callable = None) -> bool:
         """显示桌面 → OCR 找图标文字 → 双击启动。"""
         from element_locator import ElementLocator
 
         # 显示桌面
         pyautogui.hotkey("win", "d")
-        time.sleep(0.5)
+        self._sleep(0.5, should_stop)
 
         img = self.screenshot()
         locator = ocr_locator or ElementLocator(self.config, *img.size)
         print(f"[Desktop OCR] 截图 {img.size}, 查找: {keywords}")
+
+        if should_stop and should_stop():
+            raise RuntimeError("用户取消")
 
         # 收集所有 OCR 识别结果
         all_texts = locator._ocr_recognize(img)
@@ -127,13 +135,13 @@ class WindowManager:
         if best_coord and best_score >= 0.9:
             print(f"[Desktop OCR] 最佳匹配 \"{best_kw}\" @ {best_coord} (score={best_score:.2f}), 双击启动")
             self.double_click(*best_coord)
-            time.sleep(wait_seconds)
+            self._sleep(wait_seconds, should_stop)
             hwnd = self.find_window(keywords)
             if hwnd:
                 self._target_hwnd = hwnd
                 return True
             pyautogui.hotkey("win", "d")
-            time.sleep(0.3)
+            self._sleep(0.3, should_stop)
         elif best_coord:
             print(f"[Desktop OCR] 匹配度过低 \"{best_kw}\" score={best_score:.2f} < 0.9, 跳过")
         else:
@@ -207,6 +215,16 @@ class WindowManager:
         pyautogui.press(key)
 
     # ── 等待 ──────────────────────────────────────────────────
+
+    def _sleep(self, seconds: float, should_stop: callable = None):
+        """分段 sleep，每 0.1s 检查停止标志。"""
+        remaining = seconds
+        while remaining > 0:
+            if should_stop and should_stop():
+                raise RuntimeError("用户取消")
+            chunk = min(0.1, remaining)
+            time.sleep(chunk)
+            remaining -= chunk
 
     def wait(self, seconds: float) -> None:
         """等待指定秒数。"""
