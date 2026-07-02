@@ -17,6 +17,24 @@ from config import Config
 from intent_parser import IntentParser
 from task_planner import TaskPlanner
 
+# ── 配色方案 ─────────────────────────────────────────────────
+
+BG       = "#f0f2f5"   # 主背景
+CARD_BG  = "#ffffff"   # 卡片背景
+PRIMARY  = "#4f46e5"   # 主色调（按钮、强调）
+SUCCESS  = "#16a34a"   # 成功
+DANGER   = "#dc2626"   # 失败
+WARN     = "#ea580c"   # 执行中
+TEXT     = "#1e293b"   # 主文字
+TEXT_SEC = "#64748b"   # 次要文字
+LOG_BG   = "#1e293b"   # 日志区背景
+LOG_OK   = "#4ade80"   # 日志-成功
+LOG_FAIL = "#f87171"   # 日志-失败
+LOG_INFO = "#94a3b8"   # 日志-信息
+
+FONT_CJK = ("Microsoft YaHei UI", 10)
+FONT_MONO = ("Cascadia Code", 9)
+
 
 class AgentApp:
     """桌面 Agent 主窗口。"""
@@ -38,67 +56,195 @@ class AgentApp:
     def _build_ui(self):
         self.root = tk.Tk()
         self.root.title("CUA-Skill 桌面 Agent")
-        self.root.geometry("800x600")
-        self.root.minsize(600, 400)
+        self.root.geometry("960x680")
+        self.root.minsize(700, 500)
+        self.root.configure(bg=BG)
 
-        # ── 顶部：指令输入区 ──
-        top_frame = ttk.Frame(self.root, padding=8)
-        top_frame.pack(fill=tk.X)
+        self._setup_styles()
 
-        ttk.Label(top_frame, text="指令:").pack(side=tk.LEFT)
-        self.cmd_entry = ttk.Entry(top_frame, font=("", 11))
-        self.cmd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-        self.cmd_entry.bind("<Return>", lambda e: self._start())
+        # 主容器
+        main = tk.Frame(self.root, bg=BG, padx=16, pady=16)
+        main.pack(fill=tk.BOTH, expand=True)
+
+        # ── 标题栏 ──
+        header = tk.Frame(main, bg=BG)
+        header.pack(fill=tk.X, pady=(0, 12))
+        tk.Label(header, text="CUA-Skill",
+                 font=("Microsoft YaHei UI", 20, "bold"), fg=PRIMARY, bg=BG).pack(side=tk.LEFT)
+        tk.Label(header, text="桌面 Agent",
+                 font=("Microsoft YaHei UI", 20), fg=TEXT, bg=BG).pack(side=tk.LEFT, padx=(4, 0))
+
+        # ── 输入卡片 ──
+        input_card = tk.Frame(main, bg=CARD_BG, highlightthickness=1,
+                              highlightbackground="#e2e8f0")
+        input_card.pack(fill=tk.X, pady=(0, 10))
+
+        # 输入区标题
+        input_header = tk.Frame(input_card, bg=CARD_BG, padx=14, pady=(12, 6))
+        input_header.pack(fill=tk.X)
+        tk.Label(input_header, text="输入指令",
+                 font=("Microsoft YaHei UI", 11, "bold"), fg=TEXT, bg=CARD_BG).pack(side=tk.LEFT)
+        tk.Label(input_header, text="Enter 发送，支持复合指令与 Agent 模式",
+                 font=(FONT_CJK[0], 9), fg=TEXT_SEC, bg=CARD_BG).pack(side=tk.LEFT, padx=8)
+
+        # 多行输入框
+        input_body = tk.Frame(input_card, bg=CARD_BG, padx=14)
+        input_body.pack(fill=tk.X)
+        self.cmd_entry = tk.Text(
+            input_body,
+            font=("Microsoft YaHei UI", 12),
+            height=3,
+            relief=tk.FLAT,
+            wrap=tk.WORD,
+            fg=TEXT,
+            bg="#f8fafc",
+            insertbackground=PRIMARY,
+            selectbackground="#c7d2fe",
+            padx=10, pady=10,
+            borderwidth=1,
+            highlightthickness=1,
+            highlightbackground="#e2e8f0",
+            highlightcolor=PRIMARY,
+        )
+        self.cmd_entry.pack(fill=tk.X)
+        self.cmd_entry.bind("<Return>", self._on_enter)
+        self.cmd_entry.bind("<Shift-Return>", lambda e: None)  # Shift+Enter 换行
         self.cmd_entry.focus_set()
 
-        self.btn_run = ttk.Button(top_frame, text="执行", command=self._start)
-        self.btn_run.pack(side=tk.LEFT, padx=2)
+        # 快捷指令标签
+        quick_frame = tk.Frame(input_card, bg=CARD_BG, padx=14, pady=(8, 12))
+        quick_frame.pack(fill=tk.X)
+        tk.Label(quick_frame, text="快捷:", font=(FONT_CJK[0], 9),
+                 fg=TEXT_SEC, bg=CARD_BG).pack(side=tk.LEFT)
+        for label, cmd in [
+            ("打开东方财富", "打开东方财富，点击游客登录"),
+            ("沪深京排行", "打开东方财富，点击游客登录，再点击沪深京排行"),
+            ("Agent模式", "帮我打开东方财富，点击游客登录，找到沪深京排行"),
+        ]:
+            btn = tk.Label(quick_frame, text=label, font=(FONT_CJK[0], 9),
+                           fg=PRIMARY, bg=CARD_BG, cursor="hand2")
+            btn.pack(side=tk.LEFT, padx=(8, 0))
+            btn.bind("<Button-1>", lambda e, c=cmd: self._set_command(c))
 
-        self.btn_stop = ttk.Button(top_frame, text="停止", command=self._stop, state=tk.DISABLED)
+        # ── 按钮栏 ──
+        btn_bar = tk.Frame(main, bg=BG)
+        btn_bar.pack(fill=tk.X, pady=(0, 8))
+
+        self.btn_run = ttk.Button(btn_bar, text="▶  执行", command=self._start,
+                                  style="Primary.TButton")
+        self.btn_run.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.btn_stop = ttk.Button(btn_bar, text="■  停止", command=self._stop,
+                                   state=tk.DISABLED, style="Danger.TButton")
         self.btn_stop.pack(side=tk.LEFT)
 
-        # ── 状态栏 ──
-        status_frame = ttk.Frame(self.root, padding=(8, 0))
-        status_frame.pack(fill=tk.X)
+        # 状态指示器
+        self.status_indicator = tk.Canvas(btn_bar, width=10, height=10,
+                                          bg=BG, highlightthickness=0)
+        self.status_indicator.pack(side=tk.LEFT, padx=(16, 4))
+        self._draw_indicator(SUCCESS)
 
-        self.status_label = ttk.Label(status_frame, text="● 就绪", foreground="green")
+        self.status_label = tk.Label(btn_bar, text="就绪",
+                                     font=(FONT_CJK[0], 10), fg=TEXT_SEC, bg=BG)
         self.status_label.pack(side=tk.LEFT)
 
-        self.progress = ttk.Progressbar(status_frame, mode="determinate", length=200)
-        self.progress.pack(side=tk.RIGHT, padx=4)
+        # 耗时
+        self.time_label = tk.Label(btn_bar, text="", font=(FONT_CJK[0], 9),
+                                    fg=TEXT_SEC, bg=BG)
+        self.time_label.pack(side=tk.RIGHT, padx=(0, 8))
 
-        self.time_label = ttk.Label(status_frame, text="")
-        self.time_label.pack(side=tk.RIGHT, padx=8)
+        # 进度
+        self.progress = ttk.Progressbar(btn_bar, mode="determinate", length=160,
+                                        style="TProgressbar")
+        self.progress.pack(side=tk.RIGHT)
 
-        # ── 日志区 ──
-        log_frame = ttk.Frame(self.root, padding=8)
-        log_frame.pack(fill=tk.BOTH, expand=True)
+        # ── 日志卡片 ──
+        log_card = tk.Frame(main, bg=CARD_BG, highlightthickness=1,
+                           highlightbackground="#e2e8f0")
+        log_card.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
 
-        self.log_area = scrolledtext.ScrolledText(
-            log_frame,
-            font=("Consolas", 9),
+        log_header = tk.Frame(log_card, bg=CARD_BG, padx=14, pady=(10, 6))
+        log_header.pack(fill=tk.X)
+        tk.Label(log_header, text="执行日志",
+                 font=("Microsoft YaHei UI", 11, "bold"), fg=TEXT, bg=CARD_BG).pack(side=tk.LEFT)
+
+        # 日志文本框
+        log_body = tk.Frame(log_card, bg=CARD_BG, padx=14, pady=(0, 12))
+        log_body.pack(fill=tk.BOTH, expand=True)
+
+        self.log_area = tk.Text(
+            log_body,
+            font=FONT_MONO,
             wrap=tk.WORD,
             state=tk.DISABLED,
+            relief=tk.FLAT,
+            fg="#cbd5e1",
+            bg=LOG_BG,
+            insertbackground="#cbd5e1",
+            selectbackground="#334155",
+            padx=12, pady=10,
         )
         self.log_area.pack(fill=tk.BOTH, expand=True)
 
-        # 颜色标签
-        self.log_area.tag_config("ok", foreground="green")
-        self.log_area.tag_config("fail", foreground="red")
-        self.log_area.tag_config("info", foreground="gray")
-        self.log_area.tag_config("bold", foreground="black")
+        # 日志颜色标签
+        self.log_area.tag_config("ok", foreground=LOG_OK)
+        self.log_area.tag_config("fail", foreground=LOG_FAIL)
+        self.log_area.tag_config("info", foreground=LOG_INFO)
+        self.log_area.tag_config("bold", foreground="#e2e8f0",
+                                 font=(FONT_MONO[0], FONT_MONO[1], "bold"))
 
-        # ── 底部：已注册应用 ──
-        bottom_frame = ttk.Frame(self.root, padding=(8, 4))
-        bottom_frame.pack(fill=tk.X)
+        # ── 底部 ──
+        footer = tk.Frame(main, bg=BG)
+        footer.pack(fill=tk.X)
         apps = self.planner.list_apps()
-        ttk.Label(bottom_frame, text=f"已注册应用: {', '.join(apps)}",
-                  foreground="gray").pack(side=tk.LEFT)
+        tk.Label(footer, text=f"已注册: {', '.join(apps)}",
+                 font=(FONT_CJK[0], 8), fg=TEXT_SEC, bg=BG).pack(side=tk.LEFT)
+
+    def _setup_styles(self):
+        """配置 ttk 样式。"""
+        style = ttk.Style()
+        style.theme_use('clam')
+
+        style.configure("Primary.TButton",
+                        font=("Microsoft YaHei UI", 10, "bold"),
+                        background=PRIMARY, foreground="white",
+                        borderwidth=0, padding=(20, 8))
+        style.map("Primary.TButton",
+                  background=[("active", "#4338ca"), ("disabled", "#c7d2fe")],
+                  foreground=[("disabled", "#e2e8f0")])
+
+        style.configure("Danger.TButton",
+                        font=("Microsoft YaHei UI", 10, "bold"),
+                        background="white", foreground=DANGER,
+                        borderwidth=1, padding=(20, 8))
+        style.map("Danger.TButton",
+                  background=[("active", "#fef2f2")])
+
+        style.configure("TProgressbar", thickness=5, background=PRIMARY,
+                        troughcolor="#e2e8f0", borderwidth=0)
+
+    def _draw_indicator(self, color: str):
+        self.status_indicator.delete("all")
+        r = 4
+        self.status_indicator.create_oval(1, 1, 2*r+1, 2*r+1,
+                                          fill=color, outline=color)
+
+    def _on_enter(self, event):
+        """Enter 键发送，Shift+Enter 换行。"""
+        if event.state & 1:   # Shift pressed
+            return None
+        self._start()
+        return "break"         # 阻止默认换行
+
+    def _set_command(self, text: str):
+        """快捷指令按钮：填入输入框。"""
+        self.cmd_entry.delete("1.0", tk.END)
+        self.cmd_entry.insert("1.0", text)
 
     # ── 执行控制 ────────────────────────────────────────────────
 
     def _start(self):
-        text = self.cmd_entry.get().strip()
+        text = self.cmd_entry.get("1.0", tk.END).strip()
         if not text:
             return
         if self._running:
@@ -110,7 +256,7 @@ class AgentApp:
         self.progress.config(value=0)
         self.time_label.config(text="")
 
-        self._log(f"用户指令: {text}", "info")
+        self._log(f"▸ {text}", "bold")
 
         thread = threading.Thread(target=self._worker, args=(text,), daemon=True)
         thread.start()
@@ -128,19 +274,19 @@ class AgentApp:
         self._put_msg(("log", ("正在解析意图...", "info")))
         intent = self.parser.parse(text)
         self._put_msg(("log", (
-            f"解析结果: action={intent.action}, app={intent.app}, query={intent.query}",
-            "bold",
+            f"解析: action={intent.action}, app={intent.app}",
+            "info",
         )))
 
         if intent.action == "unknown":
-            self._put_msg(("log", ("无法理解指令，请尝试更明确的说法", "fail")))
+            self._put_msg(("log", ("无法理解指令", "fail")))
             self._put_msg(("done", None))
             return
 
         # 2. 任务规划
         self._put_msg(("log", ("正在规划任务...", "info")))
         steps, keywords = self.planner.plan(intent)
-        self._put_msg(("log", (f"生成 {len(steps)} 个步骤, 窗口关键词: {keywords}", "info")))
+        self._put_msg(("log", (f"规划: {len(steps)} 步, 窗口关键词: {keywords}", "info")))
         self._put_msg(("max_progress", len(steps)))
 
         if not steps:
@@ -157,12 +303,12 @@ class AgentApp:
 
             self._put_msg(("step_start", step))
 
-            # Agent 模式：交给 AgentLoop 循环处理
+            # Agent 模式
             if step.type == "agent":
                 self._run_agent_step(step, keywords, logs)
                 continue
 
-            # 执行单个 Step
+            # 常规步骤
             t_step = time.time()
             log = StepLog(step_index=len(logs), step_type=step.type)
             hwnd = None
@@ -186,9 +332,10 @@ class AgentApp:
             logs.append(log)
 
         total_ms = int((time.time() - t0) * 1000)
+        ok_count = sum(1 for l in logs if l.success)
         self._put_msg(("log", (
-            f"执行完成: {sum(1 for l in logs if l.success)}/{len(logs)} 成功, "
-            f"总耗时 {total_ms / 1000:.1f}s",
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"完成: {ok_count}/{len(logs)} 成功, 总耗时 {total_ms / 1000:.1f}s",
             "bold",
         )))
         self._put_msg(("done", None))
@@ -196,13 +343,13 @@ class AgentApp:
     # ── Agent 模式 ──────────────────────────────────────────────
 
     def _run_agent_step(self, step, keywords, logs):
-        """运行 Agent 循环，将每一步反映到 GUI 日志中。"""
+        """运行 Agent 循环。"""
         t_start = time.time()
         goal = step.text or ""
         self._put_msg(("log", (f"[Agent] 目标: {goal}", "bold")))
 
         if not self.executor.config.ollama_base_url:
-            self._put_msg(("log", ("[Agent] Ollama 不可用，无法执行 Agent 任务", "fail")))
+            self._put_msg(("log", ("[Agent] Ollama 不可用", "fail")))
             log = StepLog(step_index=len(logs), step_type="agent",
                          error="Ollama 不可用", success=False)
             logs.append(log)
@@ -211,18 +358,17 @@ class AgentApp:
         agent = AgentLoop(self.executor.wm, self.executor.locator,
                          self.executor.config)
 
-        # 如果已找到窗口，先激活
         hwnd = None
         if keywords:
             hwnd = self.executor.wm.find_window(keywords)
             if hwnd:
                 self.executor.wm.activate(hwnd)
 
-        # 跟踪 Agent 内部步数
         agent_step_count = [0]
 
         def on_step(step_num, _action):
             agent_step_count[0] = step_num
+            self._put_msg(("log", (f"  [Agent] 第{step_num}步...", "info")))
 
         def on_done(message):
             pass
@@ -235,7 +381,7 @@ class AgentApp:
 
         if success:
             self._put_msg(("log", (
-                f"[Agent] 完成: {result} ({agent_step_count[0]} 步, {elapsed_ms / 1000:.1f}s)",
+                f"[Agent] 完成: {result} ({agent_step_count[0]}步, {elapsed_ms / 1000:.1f}s)",
                 "ok",
             )))
         else:
@@ -246,13 +392,12 @@ class AgentApp:
                      error="" if success else result)
         logs.append(log)
 
-    # ── 消息队列（子线程 → GUI）────────────────────────────────
+    # ── 消息队列（子线程 → GUI） ────────────────────────────────
 
     def _put_msg(self, msg):
         self._msg_queue.put(msg)
 
     def _poll_queue(self):
-        """每隔 100ms 检查消息队列，更新 UI。"""
         try:
             while True:
                 msg = self._msg_queue.get_nowait()
@@ -270,29 +415,29 @@ class AgentApp:
             self.progress.config(maximum=data)
         elif kind == "step_start":
             step = data
-            text = step_desc(step)
-            self._log(f"→ {text}", "info")
-            self.status_label.config(text="● 执行中", foreground="orange")
+            self._log(f"  → {step_desc(step)}", "info")
+            self.status_label.config(text="执行中", fg=WARN)
+            self._draw_indicator(WARN)
         elif kind == "step_ok":
             log = data
-            self._log(f"  [OK] {log.elapsed_ms}ms @{log.found_coord}", "ok")
+            self._log(f"    ✓ {log.elapsed_ms}ms @{log.found_coord}", "ok")
             self.progress.step(1)
         elif kind == "step_fail":
             log = data
-            self._log(f"  [FAIL] {log.error}", "fail")
+            self._log(f"    ✗ {log.error}", "fail")
             self.progress.step(1)
         elif kind == "done":
             self._running = False
             self.btn_run.config(state=tk.NORMAL)
             self.btn_stop.config(state=tk.DISABLED)
-            self.status_label.config(text="● 就绪", foreground="green")
+            self.status_label.config(text="就绪", fg=TEXT_SEC)
+            self._draw_indicator(SUCCESS)
             self.progress.config(value=0)
 
     def _log(self, text: str, tag: str = ""):
         ts = datetime.now().strftime("%H:%M:%S")
         self.log_area.config(state=tk.NORMAL)
-        line = f"[{ts}] {text}\n"
-        self.log_area.insert(tk.END, line, tag)
+        self.log_area.insert(tk.END, f"[{ts}] {text}\n", tag)
         self.log_area.see(tk.END)
         self.log_area.config(state=tk.DISABLED)
 
@@ -305,26 +450,16 @@ class AgentApp:
 def step_desc(step) -> str:
     """生成步骤的可读描述。"""
     t = step.type
-    if t == "launch":
-        return f"启动应用: {step.text or ''}"
-    if t == "click":
-        return f"点击 \"{step.target}\""
-    if t == "right_click":
-        return f"右键 \"{step.target}\""
-    if t == "double_click":
-        return f"双击 \"{step.target}\""
-    if t == "type":
-        return f"输入 \"{step.text}\""
-    if t == "hotkey":
-        return f"组合键 {'+'.join(step.keys or [])}"
-    if t == "press":
-        return f"按键 {step.key}"
-    if t == "wait":
-        return f"等待 {step.seconds}s"
-    if t == "scroll":
-        return f"滚动 {step.text or ''}"
-    if t == "agent":
-        return f"AI Agent: {step.text or ''}"
+    if t == "launch":     return f"启动: {step.text or ''}"
+    if t == "click":      return f"点击 \"{step.target}\""
+    if t == "right_click": return f"右键 \"{step.target}\""
+    if t == "double_click": return f"双击 \"{step.target}\""
+    if t == "type":       return f"输入 \"{step.text}\""
+    if t == "hotkey":     return f"组合键 {'+'.join(step.keys or [])}"
+    if t == "press":      return f"按键 {step.key}"
+    if t == "wait":       return f"等待 {step.seconds}s"
+    if t == "scroll":     return f"滚动 {step.text or ''}"
+    if t == "agent":      return f"AI Agent: {step.text or ''}"
     return str(t)
 
 
