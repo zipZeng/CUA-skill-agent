@@ -33,13 +33,22 @@ skill_library/       应用模板库（可扩展）
 ## 安装
 
 ```bash
+git clone https://github.com/zipZeng/CUA-skill-agent.git
 cd cua-agent
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
 ```
 
-首次运行时会自动下载 RapidOCR 模型（约 30MB）。
+双击 `run.bat` 即可，**首次运行自动创建虚拟环境并安装依赖**。
+
+首次运行 RapidOCR 会自动下载模型（约 30MB）。
+
+### Agent 模式（可选）
+
+Agent 模式需要 Ollama + 模型，非 Agent 模式（模板匹配）无需此步骤：
+
+```bash
+# 安装 Ollama: https://ollama.com
+ollama pull qwen3.5:4b
+```
 
 ## 使用
 
