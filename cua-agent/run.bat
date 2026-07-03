@@ -21,6 +21,23 @@ if not exist "venv\Scripts\activate" (
     echo.
 )
 
+:: 检查 Ollama 和模型（Agent模式需要）
+set MODEL_NAME=qwen3.5:4b
+ollama --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [提示] 未检测到 Ollama，Agent 模式不可用（模板匹配模式仍可正常使用）
+    echo 安装 Ollama: https://ollama.com
+    echo.
+) else (
+    ollama list 2>nul | findstr /c:"%MODEL_NAME%" >nul
+    if %errorlevel% neq 0 (
+        echo [首次运行] 正在拉取 Ollama 模型 %MODEL_NAME% （约 2.5GB，仅此一次）...
+        ollama pull %MODEL_NAME%
+        echo [首次运行] 模型拉取完成！
+        echo.
+    )
+)
+
 call venv\Scripts\activate
 python main.py
 pause
