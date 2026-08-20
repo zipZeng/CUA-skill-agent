@@ -179,6 +179,15 @@ class TaskPlanner:
         query = intent.query
         targets = intent.params.get("targets", [])
 
+        # 复合指令：按动作序列生成混合步骤（点击/右键/双击/鼠标移动等）
+        actions = intent.params.get("actions")
+        if actions:
+            steps = self._steps_from_actions(actions)
+            # 序列里已含 launch 则不再重复插入
+            if not any(s.type == "launch" for s in steps):
+                steps = self._prepend_launch(template, steps)
+            return steps
+
         if action == "click" and targets:
             for t in targets:
                 steps.append(Step(type="click", target=t))
@@ -197,6 +206,35 @@ class TaskPlanner:
             steps.append(Step(type="wait", seconds=0.5))
 
         return self._prepend_launch(template, steps)
+
+    def _steps_from_actions(self, actions: list[dict]) -> list[Step]:
+        """把动作序列 [{action, target}] 转成 Step 列表。"""
+        steps = []
+        for a in actions:
+            act = a.get("action", "click")
+            target = a.get("target", "")
+            if act == "click":
+                steps.append(Step(type="click", target=target))
+            elif act == "right_click":
+                steps.append(Step(type="right_click", target=target or None))
+            elif act == "double_click":
+                steps.append(Step(type="double_click", target=target or None))
+            elif act == "move_down":
+                steps.append(Step(type="move_center"))
+            elif act == "move_up":
+                steps.append(Step(type="move", dx=0, dy=-self.config.mouse_move_step))
+            elif act == "launch":
+                steps.append(Step(type="launch", text=target))
+            elif act == "type":
+                steps.append(Step(type="type", text=target))
+            elif act == "search":
+                steps.append(Step(type="click", target="搜索框",
+                                 fallback=["搜索", "地址栏"]))
+                steps.append(Step(type="type", text=target))
+                steps.append(Step(type="press", key="enter"))
+            elif act == "close":
+                steps.append(Step(type="hotkey", keys=["alt", "f4"]))
+        return steps
 
     def _fallback_plan(self, intent: Intent) -> list[Step]:
         """无模板时的通用兜底计划。"""

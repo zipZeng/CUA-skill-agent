@@ -225,9 +225,13 @@ class AgentLoop:
                         {"role": "user", "content": user_prompt},
                     ],
                     "stream": False,
-                    "options": {"temperature": 0.1},
+                    "think": False,          # 关闭思考链，避免每步生成数千 token 拖慢决策
+                    "options": {
+                        "temperature": 0.1,
+                        "num_predict": 256,   # 决策只需一个短 JSON，限制最大生成长度
+                    },
                 },
-                timeout=30,
+                timeout=60,
             )
             data = resp.json()
             return data.get("message", {}).get("content", "")

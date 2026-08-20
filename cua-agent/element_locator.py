@@ -53,6 +53,11 @@ class ElementLocator:
     # OCR 前将截图缩放到的最大宽度（加速识别）
     OCR_MAX_WIDTH = 1920
 
+    # 有参考点时的 ROI 裁剪范围（右键菜单/对话框通常出现在参考点右下方）
+    ROI_MARGIN_X = 500
+    ROI_MARGIN_Y_UP = 80
+    ROI_MARGIN_Y_DOWN = 520
+
     def __init__(self, config: Config = None, screen_w: int = 1920, screen_h: int = 1080):
         self.config = config or Config()
         self.screen_w = screen_w
@@ -75,18 +80,20 @@ class ElementLocator:
         image: Image.Image,
         target: str,
         fallback: list[str] = None,
+        near: tuple[int, int] = None,
     ) -> Optional[tuple[int, int]]:
         """在截图中查找目标文字，返回中心坐标 (x, y)，未找到返回 None。
 
         查找顺序：OCR → 模板坐标估计。
+        near: 参考点（上次点击位置），用于优先匹配附近的同名文字并加速识别。
         """
         # 策略1：OCR
-        coord = self._ocr_find(image, target)
+        coord = self._ocr_find(image, target, near)
         if coord:
             return coord
         if fallback:
             for fb in fallback:
-                coord = self._ocr_find(image, fb)
+                coord = self._ocr_find(image, fb, near)
                 if coord:
                     return coord
 
@@ -122,40 +129,101 @@ class ElementLocator:
 
     # ── 策略1：OCR ─────────────────────────────────────────────
 
-    def _ocr_find(self, image: Image.Image, target: str) -> Optional[tuple[int, int]]:
-        """OCR 识别截图 → 模糊匹配目标文字 → 返回中心坐标。"""
-        results = self._ocr_recognize(image)
-        best, best_score, best_text = None, self.config.ocr_fuzzy_threshold, ""
+    def _ocr_find(self, image: Image.Image, target: str,
+                  near: tuple[int, int] = None) -> Optional[tuple[int, int]]:
+        """OCR 识别截图 → 模糊匹配目标文字 → 返回中心坐标。
 
+        有 near 参考点时，先在参考点附近 ROI 内快速查找（右键菜单/对话框
+        通常出现在参考点右下方），命中高置信匹配直接返回；否则回退全屏查找，
+        并在多个候选里优先选离参考点最近的，避免点到远处的同名文字。
+        """
+        if near:
+            roi_cands = [
+                c for c in self._collect_candidates(
+                    self._ocr_recognize(image, region=self._near_region(image.size, near)),
+                    target,
+                ) if c[0] >= 0.85
+            ]
+            if roi_cands:
+                nx, ny = near
+                roi_cands.sort(key=lambda c: self._dist2(c[1], nx, ny))
+                score, bbox, text = roi_cands[0]
+                return self._coord_from_bbox(bbox, target, text, score)
+
+        candidates = self._collect_candidates(self._ocr_recognize(image), target)
+        if not candidates:
+            return None
+
+        if near:
+            nx, ny = near
+            max_score = max(c[0] for c in candidates)
+            top = [c for c in candidates if c[0] >= max_score - 0.05]
+            top.sort(key=lambda c: self._dist2(c[1], nx, ny))
+            score, bbox, text = top[0]
+        else:
+            candidates.sort(key=lambda c: -c[0])
+            score, bbox, text = candidates[0]
+
+        return self._coord_from_bbox(bbox, target, text, score)
+
+    def _collect_candidates(self, results: list, target: str) -> list:
+        """收集所有超过阈值的目标匹配，返回 [(score, bbox, text), ...]。"""
+        cands = []
         for text, bbox in results:
             score = self._match_score(target, text)
-            if score > best_score:
-                best_score = score
-                best = bbox
-                best_text = text
+            if score >= self.config.ocr_fuzzy_threshold:
+                cands.append((score, bbox, text))
+        return cands
 
-        if best:
-            x1, y1, x2, y2 = best
-            y_center = (y1 + y2) // 2
-            bbox_w = x2 - x1
+    @staticmethod
+    def _dist2(bbox: tuple, nx: int, ny: int) -> float:
+        """bbox 中心到参考点 (nx, ny) 的平方距离。"""
+        cx = (bbox[0] + bbox[2]) // 2
+        cy = (bbox[1] + bbox[3]) // 2
+        return (cx - nx) ** 2 + (cy - ny) ** 2
 
-            # 子串匹配时根据 target 在 OCR 文字中的位置偏移 x 坐标
-            t_lower = target.lower()
-            o_lower = best_text.lower()
-            if t_lower in o_lower and len(o_lower) > len(t_lower):
-                idx = o_lower.index(t_lower)
-                char_w = bbox_w / len(o_lower) if len(o_lower) > 0 else bbox_w
-                target_center_x = int(x1 + char_w * (idx + len(target) / 2))
-            else:
-                target_center_x = (x1 + x2) // 2
+    def _near_region(self, size: tuple, near: tuple[int, int]) -> tuple[int, int, int, int]:
+        """参考点附近的 ROI 裁剪区域（偏向右下方，覆盖右键菜单）。"""
+        nx, ny = near
+        w, h = size
+        x1 = max(0, nx - self.ROI_MARGIN_X)
+        y1 = max(0, ny - self.ROI_MARGIN_Y_UP)
+        x2 = min(w, nx + self.ROI_MARGIN_X)
+        y2 = min(h, ny + self.ROI_MARGIN_Y_DOWN)
+        return (x1, y1, x2, y2)
 
-            coord = (target_center_x, y_center)
-            if best_score < 0.9:
-                print(f"[OCR] 模糊匹配 target='{target}' → ocr_text='{best_text}' score={best_score:.2f} @{coord}")
-            else:
-                print(f"[OCR] 匹配 target='{target}' → ocr_text='{best_text}' @{coord}")
-            return coord
-        return None
+    def _coord_from_bbox(self, best, target, best_text, best_score) -> tuple[int, int]:
+        """从匹配到的 bbox 计算目标文字的中心点击坐标。"""
+        x1, y1, x2, y2 = best
+        y_center = (y1 + y2) // 2
+        bbox_w = x2 - x1
+        char_h = y2 - y1
+
+        t_lower = target.lower()
+        o_lower = best_text.lower()
+
+        # 定位 target 在匹配文本中的字符区间
+        if t_lower in o_lower:
+            start_ch = o_lower.index(t_lower)
+            end_ch = start_ch + len(target)
+        else:
+            start_ch, end_ch = 0, len(o_lower) or len(target)
+
+        # 用字符高度估算字符宽度（中文字符近似方块字）。
+        # 若 bbox 把右侧下拉箭头等图标一并框了进来，按宽度均分会把
+        # 点击点带偏到箭头上，改用字符高度估算能更准地落在文字正中间。
+        char_w = char_h
+        if o_lower and char_w * len(o_lower) > bbox_w:
+            char_w = bbox_w / len(o_lower)
+
+        target_center_x = int(x1 + char_w * (start_ch + end_ch) / 2)
+
+        coord = (target_center_x, y_center)
+        if best_score < 0.9:
+            print(f"[OCR] 模糊匹配 target='{target}' → ocr_text='{best_text}' score={best_score:.2f} @{coord}")
+        else:
+            print(f"[OCR] 匹配 target='{target}' → ocr_text='{best_text}' @{coord}")
+        return coord
 
     def _ocr_find_all(self, image: Image.Image, target: str) -> list[tuple[int, int]]:
         """OCR 识别 → 返回所有匹配位置的坐标列表。"""
@@ -168,9 +236,22 @@ class ElementLocator:
                 coords.append(((x1 + x2) // 2, (y1 + y2) // 2))
         return coords
 
-    def _ocr_recognize(self, image: Image.Image) -> list[tuple[str, tuple[int, int, int, int]]]:
+    def _ocr_recognize(self, image: Image.Image,
+                       region: tuple[int, int, int, int] = None) -> list[tuple[str, tuple[int, int, int, int]]]:
         """对 PIL Image 执行 OCR，返回 [(文字, (x1,y1,x2,y2)), ...]。
-        自动缩放加速识别，坐标自动映射回原始尺寸。"""
+        自动缩放加速识别，坐标自动映射回原始尺寸。
+        region: 可选裁剪区域 (x1,y1,x2,y2)，只识别该区域（坐标仍映射回原图）。
+        """
+        offset_x, offset_y = 0, 0
+        if region:
+            x1, y1, x2, y2 = region
+            w, h = image.size
+            x1, y1 = max(0, int(x1)), max(0, int(y1))
+            x2, y2 = min(w, int(x2)), min(h, int(y2))
+            if x2 > x1 and y2 > y1:
+                image = image.crop((x1, y1, x2, y2))
+                offset_x, offset_y = x1, y1
+
         # 缩放加速
         w, h = image.size
         if w > self.OCR_MAX_WIDTH:
@@ -189,10 +270,10 @@ class ElementLocator:
         results = []
         for bbox, text, _conf in result:
             # bbox: [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
-            x1 = int(min(p[0] for p in bbox) * self._scale)
-            y1 = int(min(p[1] for p in bbox) * self._scale)
-            x2 = int(max(p[0] for p in bbox) * self._scale)
-            y2 = int(max(p[1] for p in bbox) * self._scale)
+            x1 = int(min(p[0] for p in bbox) * self._scale) + offset_x
+            y1 = int(min(p[1] for p in bbox) * self._scale) + offset_y
+            x2 = int(max(p[0] for p in bbox) * self._scale) + offset_x
+            y2 = int(max(p[1] for p in bbox) * self._scale) + offset_y
             results.append((text, (x1, y1, x2, y2)))
         return results
 

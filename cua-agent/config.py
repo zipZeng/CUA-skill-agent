@@ -27,6 +27,9 @@ class Config:
     dialog_timeout: float = 10.0    # 对话框出现等待
     max_retries: int = 3            # 单步最大重试
 
+    # ── 鼠标移动 ──
+    mouse_move_step: int = 300      # "鼠标下移/上移" 单次移动的像素距离
+
     # ── 路径 ──
     log_dir: str = "./logs"         # 日志目录
     screenshot_dir: str = "./logs/screenshots"  # 截图目录

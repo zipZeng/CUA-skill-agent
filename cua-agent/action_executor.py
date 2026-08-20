@@ -22,7 +22,7 @@ from window_manager import WindowManager
 @dataclass
 class Step:
     """任务规划器输出的一步操作。"""
-    type: str              # launch|click|right_click|double_click|type|hotkey|press|wait|scroll
+    type: str              # launch|click|right_click|double_click|type|hotkey|press|wait|scroll|move
     target: str = None     # OCR 查找的目标文字
     text: str = None       # 要输入的文字
     keys: list = None      # 组合键
@@ -31,6 +31,8 @@ class Step:
     fallback: list = None  # 备选目标文字（依次尝试）
     optional: bool = False # 失败是否跳过继续
     repeat: int = 1        # 重复次数
+    dx: int = 0            # 鼠标相对移动 x（move 步骤）
+    dy: int = 0            # 鼠标相对移动 y（move 步骤）
 
 
 @dataclass
@@ -55,7 +57,12 @@ class ActionExecutor:
         self.config = config or Config()
         self.wm = WindowManager(self.config)
         self.locator = ElementLocator(self.config)
+        self._last_click = None  # 最近一次点击位置，供 OCR 优先匹配附近文字
         self._ensure_dirs()
+
+    def reset(self):
+        """重置任务状态（新任务开始前调用）。"""
+        self._last_click = None
 
     def _ensure_dirs(self):
         os.makedirs(self.config.screenshot_dir, exist_ok=True)
@@ -114,26 +121,34 @@ class ActionExecutor:
         # ── 需要 OCR 定位的步骤 ──
         if step.type in ("click", "right_click", "double_click"):
             log.target_text = step.target
-            log.screenshot_path = self._screenshot()
+            if step.target:
+                log.screenshot_path = self._screenshot()
 
-            # OCR 定位（轮询等待目标出现）
-            deadline = time.time() + self.config.target_appear_timeout
-            coord = None
-            while time.time() < deadline:
-                if should_stop and should_stop():
-                    raise RuntimeError("用户取消")
-                img = self.wm.screenshot()
-                coord = self.locator.find_text(img, step.target, step.fallback)
-                if coord:
-                    break
-                time.sleep(0.5)
+                # OCR 定位（轮询等待目标出现）
+                deadline = time.time() + self.config.target_appear_timeout
+                coord = None
+                while time.time() < deadline:
+                    if should_stop and should_stop():
+                        raise RuntimeError("用户取消")
+                    img = self.wm.screenshot()
+                    coord = self.locator.find_text(img, step.target, step.fallback,
+                                                  near=self._last_click)
+                    if coord:
+                        break
+                    time.sleep(0.5)
 
-            if not coord:
-                raise RuntimeError(f"未找到目标: '{step.target}' (等待 {self.config.target_appear_timeout:.0f}s)")
+                if not coord:
+                    raise RuntimeError(f"未找到目标: '{step.target}' (等待 {self.config.target_appear_timeout:.0f}s)")
+            else:
+                # 无目标：移到窗口中心（数据区）再操作，避免点在菜单栏/边缘
+                cx, cy = self.wm.window_center(hwnd)
+                self.wm.move_to(cx, cy)
+                time.sleep(0.1)
+                coord = self.wm.cursor_position()
 
             log.found_coord = coord
 
-            # 激活 → 点击 → 释放
+            # 激活 → 操作（不再 alt+tab 释放，避免把主窗口切回前台）
             if hwnd:
                 self.wm.activate(hwnd)
                 time.sleep(0.1)
@@ -146,10 +161,8 @@ class ActionExecutor:
                 self.wm.double_click(*coord)
 
             log.clicked_coord = coord
+            self._last_click = coord
             time.sleep(self.config.post_action_delay)
-
-            if hwnd:
-                self.wm.release()
 
         # ── 键盘输入 ──
         elif step.type == "type":
@@ -187,6 +200,17 @@ class ActionExecutor:
                     time.sleep(0.1)
             import pyautogui
             pyautogui.scroll(step.text or -3)
+
+        # ── 鼠标相对移动 ──
+        elif step.type == "move":
+            self.wm.move_relative(step.dx, step.dy)
+            time.sleep(0.1)
+
+        # ── 鼠标移到屏幕中心 ──
+        elif step.type == "move_center":
+            w, h = self.wm.screen_size()
+            self.wm.move_to(w // 2, h // 2)
+            time.sleep(0.1)
 
         log.success = True
 

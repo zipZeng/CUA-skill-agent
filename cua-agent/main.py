@@ -3,7 +3,9 @@
 双击运行此文件，输入自然语言指令，Agent 自动操作桌面完成任务。
 """
 
+import os
 import queue
+import sys
 import threading
 import time
 from datetime import datetime
@@ -16,6 +18,14 @@ from agent_loop import AgentLoop
 from config import Config
 from intent_parser import IntentParser
 from task_planner import TaskPlanner
+
+# pythonw 下无控制台，重定向 stdout/stderr 到日志，避免 print 抛异常
+if sys.stdout is None:
+    os.makedirs("logs", exist_ok=True)
+    _console = open(os.path.join("logs", "console.log"), "a",
+                    encoding="utf-8", buffering=1)
+    sys.stdout = _console
+    sys.stderr = _console
 
 # ── 配色方案 ─────────────────────────────────────────────────
 
@@ -119,6 +129,7 @@ class AgentApp:
         for label, cmd in [
             ("打开东方财富", "打开东方财富，点击游客登录"),
             ("沪深京排行", "打开东方财富，点击游客登录，再点击沪深京排行"),
+            ("导出数据", "打开东方财富，点击游客登录，再点击沪深京排行，再鼠标下移右键点击数据导出，导出所有数据，点击下一步，点击下一步"),
             ("Agent模式", "帮我打开东方财富，点击游客登录，找到沪深京排行"),
         ]:
             btn = tk.Label(quick_frame, text=label, font=(FONT_CJK[0], 9),
@@ -295,6 +306,7 @@ class AgentApp:
             return
 
         # 3. 逐步执行
+        self.executor.reset()
         logs = []
         for step in steps:
             if not self._running:
@@ -456,13 +468,15 @@ def step_desc(step) -> str:
     t = step.type
     if t == "launch":     return f"启动: {step.text or ''}"
     if t == "click":      return f"点击 \"{step.target}\""
-    if t == "right_click": return f"右键 \"{step.target}\""
+    if t == "right_click": return f"右键 \"{step.target}\"" if step.target else "右键（当前位置）"
     if t == "double_click": return f"双击 \"{step.target}\""
     if t == "type":       return f"输入 \"{step.text}\""
     if t == "hotkey":     return f"组合键 {'+'.join(step.keys or [])}"
     if t == "press":      return f"按键 {step.key}"
     if t == "wait":       return f"等待 {step.seconds}s"
     if t == "scroll":     return f"滚动 {step.text or ''}"
+    if t == "move":       return f"鼠标移动 ({step.dx}, {step.dy})"
+    if t == "move_center": return "鼠标移到屏幕中心"
     if t == "agent":      return f"AI Agent: {step.text or ''}"
     return str(t)
 

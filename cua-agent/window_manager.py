@@ -13,7 +13,7 @@ from config import Config
 
 
 class WindowManager:
-    """非独占式窗口管理。核心模式：激活→操作→释放。"""
+    """非独占式窗口管理。核心模式：激活→操作。"""
 
     def __init__(self, config: Config = None):
         self.config = config or Config()
@@ -165,10 +165,17 @@ class WindowManager:
         time.sleep(0.1)
         return True
 
-    def release(self) -> None:
-        """Alt+Tab 切走，释放焦点给用户。"""
-        pyautogui.hotkey("alt", "tab")
-        time.sleep(0.1)
+    def window_center(self, hwnd: int = None) -> tuple[int, int]:
+        """返回目标窗口中心坐标；无窗口时返回屏幕中心。"""
+        hwnd = hwnd or self._target_hwnd
+        if hwnd:
+            try:
+                left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+                return (left + right) // 2, (top + bottom) // 2
+            except Exception:
+                pass
+        w, h = pyautogui.size()
+        return w // 2, h // 2
 
     # ── 截图 ──────────────────────────────────────────────────
 
@@ -198,6 +205,24 @@ class WindowManager:
         pyautogui.moveTo(x, y, duration=0.15)
         time.sleep(0.05)
         pyautogui.doubleClick(x, y)
+
+    def move_relative(self, dx: int, dy: int) -> None:
+        """相对移动鼠标指针。"""
+        print(f"[Move] relative ({dx}, {dy})")
+        pyautogui.moveRel(dx, dy)
+
+    def move_to(self, x: int, y: int) -> None:
+        """绝对坐标移动鼠标指针。"""
+        print(f"[Move] absolute ({x}, {y})")
+        pyautogui.moveTo(x, y, duration=0.15)
+
+    def screen_size(self) -> tuple[int, int]:
+        """返回屏幕宽高。"""
+        return pyautogui.size()
+
+    def cursor_position(self) -> tuple[int, int]:
+        """返回当前鼠标指针坐标。"""
+        return pyautogui.position()
 
     # ── 键盘操作 ──────────────────────────────────────────────
 
