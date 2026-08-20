@@ -219,6 +219,8 @@ class TaskPlanner:
                 steps.append(Step(type="right_click", target=target or None))
             elif act == "double_click":
                 steps.append(Step(type="double_click", target=target or None))
+            elif act == "hover":
+                steps.append(Step(type="hover", target=target or None))
             elif act == "move_down":
                 steps.append(Step(type="move_center"))
             elif act == "move_up":

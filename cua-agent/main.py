@@ -129,7 +129,7 @@ class AgentApp:
         for label, cmd in [
             ("打开东方财富", "打开东方财富，点击游客登录"),
             ("沪深京排行", "打开东方财富，点击游客登录，再点击沪深京排行"),
-            ("导出数据", "打开东方财富，点击游客登录，再点击沪深京排行，再鼠标下移右键点击数据导出，导出所有数据，点击下一步，点击下一步"),
+            ("导出数据", "打开东方财富，点击游客登录，再点击沪深京排行，再鼠标下移右键悬停数据导出，点击导出所有数据，点击下一步，点击下一步"),
             ("Agent模式", "帮我打开东方财富，点击游客登录，找到沪深京排行"),
         ]:
             btn = tk.Label(quick_frame, text=label, font=(FONT_CJK[0], 9),
@@ -470,6 +470,7 @@ def step_desc(step) -> str:
     if t == "click":      return f"点击 \"{step.target}\""
     if t == "right_click": return f"右键 \"{step.target}\"" if step.target else "右键（当前位置）"
     if t == "double_click": return f"双击 \"{step.target}\""
+    if t == "hover":      return f"悬停 \"{step.target}\""
     if t == "type":       return f"输入 \"{step.text}\""
     if t == "hotkey":     return f"组合键 {'+'.join(step.keys or [])}"
     if t == "press":      return f"按键 {step.key}"

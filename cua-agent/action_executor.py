@@ -58,11 +58,13 @@ class ActionExecutor:
         self.wm = WindowManager(self.config)
         self.locator = ElementLocator(self.config)
         self._last_click = None  # 最近一次点击位置，供 OCR 优先匹配附近文字
+        self._menu_open = False  # 上下文菜单/子菜单是否处于打开状态
         self._ensure_dirs()
 
     def reset(self):
         """重置任务状态（新任务开始前调用）。"""
         self._last_click = None
+        self._menu_open = False
 
     def _ensure_dirs(self):
         os.makedirs(self.config.screenshot_dir, exist_ok=True)
@@ -119,7 +121,7 @@ class ActionExecutor:
         """执行单个 Step。"""
 
         # ── 需要 OCR 定位的步骤 ──
-        if step.type in ("click", "right_click", "double_click"):
+        if step.type in ("click", "right_click", "double_click", "hover"):
             log.target_text = step.target
             if step.target:
                 log.screenshot_path = self._screenshot()
@@ -148,17 +150,25 @@ class ActionExecutor:
 
             log.found_coord = coord
 
-            # 激活 → 操作（不再 alt+tab 释放，避免把主窗口切回前台）
-            if hwnd:
+            # 激活 → 操作。菜单打开时跳过激活：SetForegroundWindow 会关闭
+            # 右键菜单/子菜单，导致悬停/点击目标消失。hover 是纯鼠标移动，
+            # 无需激活窗口。
+            if hwnd and not self._menu_open and step.type != "hover":
                 self.wm.activate(hwnd)
                 time.sleep(0.1)
 
             if step.type == "click":
                 self.wm.click(*coord)
+                self._menu_open = False
             elif step.type == "right_click":
                 self.wm.right_click(*coord)
+                self._menu_open = True
             elif step.type == "double_click":
                 self.wm.double_click(*coord)
+                self._menu_open = False
+            elif step.type == "hover":
+                self.wm.hover(*coord)
+                # 悬停不改变菜单状态
 
             log.clicked_coord = coord
             self._last_click = coord

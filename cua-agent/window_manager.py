@@ -206,6 +206,12 @@ class WindowManager:
         time.sleep(0.05)
         pyautogui.doubleClick(x, y)
 
+    def hover(self, x: int, y: int, seconds: float = 0.5) -> None:
+        """移动鼠标到指定位置并悬停（不点击），用于展开子菜单。"""
+        print(f"[Hover] @({x}, {y})")
+        pyautogui.moveTo(x, y, duration=0.15)
+        time.sleep(seconds)
+
     def move_relative(self, dx: int, dy: int) -> None:
         """相对移动鼠标指针。"""
         print(f"[Move] relative ({dx}, {dy})")

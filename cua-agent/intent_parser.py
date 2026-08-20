@@ -45,6 +45,7 @@ _SEGMENT_ACTIONS: list[tuple[str, str]] = [
     (r"鼠标上移|鼠标向上|上移鼠标|鼠标往上", "move_up"),
     (r"右键|右击|鼠标右键",             "right_click"),
     (r"双击|鼠标双击",                 "double_click"),
+    (r"悬停|hover|鼠标悬停|悬停到",      "hover"),
     (r"点击|单击|按|按下|找到|定位|寻找",  "click"),
     (r"打开|启动|运行",                 "launch"),
     (r"输入|打字|键入",                 "type"),
